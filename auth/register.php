@@ -66,9 +66,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 <div class="main-container">
   <div class="left-section">
-    <img src="../assets/img/sitelogo.png" alt="EduSphere logo featuring an open book with a graduation cap above it, set against a blue and white background, conveying a welcoming and educational atmosphere, with the text EduSphere displayed prominently" class="logo-img" />
+    <img src="../assets/img/sitelogo.png" alt="EduSphere logo" class="logo-img" />
     <h2 class="animated-text">Welcome To EduSphere</h2>
-    <p>Smart School Engagement & Management Portal.</p>
+    <p style="font-weight: bold;">Smart School Engagement & Management Portal.</p>
     <button onclick="window.location.href='login.php'" class="login-btn">Login</button>
   </div>
 
@@ -77,16 +77,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       <div class="role-toggle">
         <?php foreach ($roles as $roleOption): ?>
           <button 
-            type="submit" 
-            name="role" 
-            value="<?php echo $roleOption; ?>" 
-            style="<?php echo ($formData['role'] === $roleOption) ? 'background-color:#4CAF50; color:white;' : ''; ?>"
-            formaction=""
+            type="button" 
+            class="<?php echo ($formData['role'] === $roleOption) ? 'active' : ''; ?>"
           >
             <?php echo $roleOption; ?>
           </button>
         <?php endforeach; ?>
       </div>
+
+      <!-- Hidden input to hold the selected role for form submission -->
+      <input type="hidden" name="role" value="<?php echo htmlspecialchars($formData['role']); ?>" />
 
       <h2>Apply as a <?php echo htmlspecialchars($formData['role']); ?></h2>
 
@@ -109,9 +109,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <input type="password" name="confirmPassword" placeholder="Confirm Password *" required />
       </div>
 
-      <?php if ($formData['role'] === 'Student'): ?>
-      <div class="form-row">
-        <select name="class" required>
+      <div class="form-row" id="class-row" style="display: <?php echo ($formData['role'] === 'Student') ? 'flex' : 'none'; ?>;">
+        <select name="class" <?php echo ($formData['role'] === 'Student') ? 'required' : ''; ?>>
           <option value="">Select Class</option>
           <?php for ($i = 1; $i <= 10; $i++): ?>
             <option value="Class <?php echo $i; ?>" <?php echo ($formData['class'] === "Class $i") ? 'selected' : ''; ?>>
@@ -120,7 +119,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           <?php endfor; ?>
         </select>
       </div>
-      <?php endif; ?>
 
       <div class="form-row radio-row">
         <label>
@@ -136,5 +134,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   </div>
 </div>
 
+<script src="../assets/js/register.js"></script>
 </body>
 </html>
