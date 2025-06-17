@@ -1,37 +1,48 @@
-document.addEventListener("DOMContentLoaded", function () {
+document.addEventListener("DOMContentLoaded", () => {
   const roleButtons = document.querySelectorAll(".role-toggle button");
-  const hiddenRoleInput = document.querySelector('input[name="role"]');
+  const roleInput = document.querySelector('input[name="role"]');
   const classRow = document.getElementById("class-row");
+  const dobRow = document.getElementById("dob-row");
+  const parentExtra = document.getElementById("parent-extra");
+  const passwordInput = document.getElementById("password");
+  const strengthText = document.getElementById("password-strength-text");
 
-  // Function to show or hide the class dropdown based on role
-  function updateClassVisibility(role) {
-    if (role === "Student") {
-      classRow.style.display = "flex";
-      classRow.querySelector("select").required = true;
-    } else {
-      classRow.style.display = "none";
-      classRow.querySelector("select").required = false;
-    }
-  }
+  const evaluateStrength = (password) => {
+    let score = 0;
+    if (password.length >= 8) score++;
+    if (/[A-Z]/.test(password)) score++;
+    if (/[a-z]/.test(password)) score++;
+    if (/[0-9]/.test(password)) score++;
+    if (/[^A-Za-z0-9]/.test(password)) score++;
 
-  // Add click listeners to all role buttons
-  roleButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      // Remove active class from all buttons
-      roleButtons.forEach((btn) => btn.classList.remove("active"));
+    if (score <= 2) return "Weak";
+    if (score === 3 || score === 4) return "Medium";
+    return "Strong";
+  };
 
-      // Add active class to the clicked button
-      button.classList.add("active");
-
-      // Update hidden input with selected role
-      const selectedRole = button.textContent.trim();
-      hiddenRoleInput.value = selectedRole;
-
-      // Show/hide class dropdown accordingly
-      updateClassVisibility(selectedRole);
-    });
+  passwordInput.addEventListener("input", () => {
+    const password = passwordInput.value;
+    const strength = evaluateStrength(password);
+    strengthText.textContent = `Password Strength: ${strength}`;
+    strengthText.style.color =
+      strength === "Strong"
+        ? "green"
+        : strength === "Medium"
+        ? "orange"
+        : "red";
   });
 
-  // On page load, set visibility of class dropdown correctly
-  updateClassVisibility(hiddenRoleInput.value);
+  roleButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      roleButtons.forEach((btn) => btn.classList.remove("active"));
+      button.classList.add("active");
+      const selectedRole = button.textContent;
+      roleInput.value = selectedRole;
+
+      // Toggle relevant fields
+      classRow.style.display = selectedRole === "Student" ? "" : "none";
+      dobRow.style.display = selectedRole === "Student" ? "" : "none";
+      parentExtra.style.display = selectedRole === "Parent" ? "" : "none";
+    });
+  });
 });
