@@ -8,15 +8,18 @@
   </head>
   <body>
     <header>
-      <div class="container">
-        <h1>EduSphere</h1>
-        <p>Smart School Engagement & Management Portal</p>
-        <nav>
-          <a href="auth/login.php">Login</a>
-          <a href="auth/register.php">Register</a>
-        </nav>
-      </div>
-    </header>
+  <div class="container">
+    <div class="branding">
+  <img src="assets/img/logo.png" alt="EduSphere Logo" class="logo">
+  <span class="brand-text">EduSphere</span>
+</div>
+    <p>Smart School Engagement & Management Portal</p>
+    <nav>
+      <a href="auth/login.php">Login</a>
+      <a href="auth/register.php">Register</a>
+    </nav>
+  </div>
+</header>
 
     <section class="hero">
       <div class="container">

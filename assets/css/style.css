@@ -22,15 +22,32 @@ body {
 
 /* Header */
 header {
-  background-color: #004080;
+  background: linear-gradient(to right, #50a8c8, #0f2b33);
   color: #fff;
   padding: 2rem 0;
   text-align: center;
 }
 
-header h1 {
-  font-size: 2.5rem;
+.branding {
+  display: flex;
+  flex-direction: column; 
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
   margin-bottom: 0.5rem;
+}
+
+.branding img.logo {
+  width: 90px; 
+  height: auto;
+  object-fit: contain;
+}
+
+.branding .brand-text {
+  font-size: 2.5rem;
+  font-weight: 700;
+  font-family: 'Segoe UI', sans-serif;
+  color: #fff;
 }
 
 header p {
@@ -47,7 +64,7 @@ header nav a {
   text-decoration: none;
   margin: 0 1rem;
   font-weight: bold;
-  background: #0066cc;
+  background: linear-gradient(to right, #50a8c8, #0f2b33);
   padding: 0.5rem 1rem;
   border-radius: 4px;
   transition: background 0.3s;
@@ -59,7 +76,7 @@ header nav a:hover {
 
 /* Hero Section */
 .hero {
-  background: linear-gradient(to right, #e6f0ff, #ffffff);
+  background: white;
   padding: 3rem 0;
   text-align: center;
 }
@@ -78,7 +95,7 @@ header nav a:hover {
 }
 
 .hero .btn {
-  background: #004080;
+  background: linear-gradient(to right, #50a8c8, #0f2b33);
   color: #fff;
   padding: 0.75rem 1.5rem;
   text-decoration: none;
@@ -129,7 +146,7 @@ header nav a:hover {
 
 /* Footer */
 footer {
-  background: #004080;
+  background: linear-gradient(to right, #50a8c8, #0f2b33);
   color: #fff;
   text-align: center;
   padding: 1rem 0;
@@ -139,8 +156,22 @@ footer {
 
 /* Responsive adjustments */
 @media (max-width: 600px) {
-  header h1 {
-    font-size: 2rem;
+  header h1,
+  .branding .brand-text {
+    font-size: 1.8rem;
+  }
+
+  .branding {
+    gap: 0.3rem;
+  }
+
+  .branding img.logo {
+    width: 50px;
+    height: auto;
+  }
+
+  header p {
+    font-size: 1rem;
   }
 
   .hero h2 {
