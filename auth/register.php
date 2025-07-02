@@ -4,6 +4,10 @@ ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 session_start();
 require_once '../includes/db.php';
+require '../vendor/autoload.php'; // PHPMailer
+
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception;
 
 $error = '';
 $formData = [
@@ -52,6 +56,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($stmt->rowCount() > 0) {
                 $error = "Email already registered";
             } else {
+                // Commenting out OTP generation and email sending for now
+                /*
+                // Generate OTP
+                $otp = rand(100000, 999999);
+                $_SESSION['otp'] = $otp;
+                $_SESSION['otp_data'] = $formData;
+                $_SESSION['student_id'] = $_POST['student_id'] ?? null; // Only used for Parent
+                $_SESSION['password_hash'] = password_hash($formData['password'], PASSWORD_DEFAULT);
+
+                // Send email via PHPMailer
+                $mail = new PHPMailer(true);
+                try {
+                    $mail->isSMTP();
+                    $mail->Host = 'smtp.gmail.com';
+                    $mail->SMTPAuth = true;
+                    $mail->Username = 'your_email@gmail.com'; // Replace with your Gmail
+                    $mail->Password = 'your_app_password';    // App Password from Google
+                    $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+                    $mail->Port = 587;
+
+                    $mail->setFrom('your_email@gmail.com', 'EduSphere');
+                    $mail->addAddress($formData['email']);
+
+                    $mail->isHTML(true);
+                    $mail->Subject = 'Your OTP for EduSphere Registration';
+                    $mail->Body    = "<p>Hello <strong>{$formData['firstName']} {$formData['lastName']}</strong>,<br>Your OTP is: <strong>{$otp}</strong></p>";
+
+                    $mail->send();
+
+                    header('Location: verify_otp.php');
+                    exit();
+                } catch (Exception $e) {
+                    $error = "OTP email could not be sent. Mailer Error: {$mail->ErrorInfo}";
+                }
+                */
+
+                // Instead directly insert user now (no OTP)
                 $passwordHash = password_hash($formData['password'], PASSWORD_DEFAULT);
 
                 $stmt = $conn->prepare("INSERT INTO users 
@@ -115,7 +156,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 ?>
-<!-- HTML CODE -->
+
+<!-- HTML PART -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -180,7 +222,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           </select>
         </div>
 
-        <div class="form-row" id="dob-row" style="<?= $formData['role'] === 'Student' ? '' : 'display: none;' ?>">
+        <div class="form-row" id="dob-row" style="<?= in_array($formData['role'], ['Student']) ? '' : 'display: none;' ?>">
           <input type="date" name="dob" placeholder="Date of Birth" value="<?= htmlspecialchars($formData['dob']) ?>" />
         </div>
 
