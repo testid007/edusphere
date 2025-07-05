@@ -31,19 +31,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     switch ($user['role']) {
                         case 'Student':
                             $_SESSION['student_name'] = $user['first_name'];
-                            header('Location: ../dashboards/student_dashboard.php');
+                            header('Location: ../dashboards/student/dashboard.php');
                             exit();
                         case 'Teacher':
                             $_SESSION['teacher_name'] = $user['first_name'];
-                            header('Location: ../dashboards/teacher_dashboard.php');
+                            header('Location: ../dashboards/teacher/dashboard.php');
                             exit();
                         case 'Admin':
                             $_SESSION['admin_name'] = $user['first_name'];
-                            header('Location: ../dashboards/admin_dashboard.php');
+                            header('Location: ../dashboards/admin/dashboard.php');
                             exit();
                         case 'Parent':
                             $_SESSION['parent_name'] = $user['first_name'];
-                            header('Location: ../dashboards/parent_dashboard.php');
+                            header('Location: ../dashboards/parent/dashboard.php');
                             exit();
                         default:
                             $error = "Unknown user role.";

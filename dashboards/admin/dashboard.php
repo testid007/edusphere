@@ -1,36 +1,38 @@
 <?php
 session_start();
-$parent_name = $_SESSION['parent_name'] ?? 'Parent';
-$parent_email = $_SESSION['parent_email'] ?? 'parent@example.com';
+$admin_name = $_SESSION['admin_name'] ?? 'Admin';
+$admin_email = $_SESSION['admin_email'] ?? 'admin@example.com';
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Parent Dashboard</title>
-  <link rel="stylesheet" href="../assets/css/dashboard.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin Dashboard</title>
+  <link rel="stylesheet" href="../../assets/css/dashboard.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
 </head>
 <body>
   <div class="container">
     <!-- Sidebar -->
     <aside class="sidebar">
       <div class="logo">
-        <img src="../assets/img/logo.png" alt="Logo" width="30">
+        <img src="../../assets/img/logo.png" alt="Logo" width="30" />
       </div>
 
       <nav class="nav">
-        <a href="#" class="active"><i class="fas fa-home"></i> Dashboard</a>
-        <a href="../parent/child-performance.php"><i class="fas fa-chart-line"></i> Child Performance</a>
-        <a href="../parent/fee-status.php"><i class="fas fa-money-bill"></i> Fee Status</a>
-        <a href="../parent/communication.php"><i class="fas fa-envelope"></i> Communicate with Teachers</a>
+        <a href="#" class="active"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
+        <a href="../admin/manage-users.php"><i class="fas fa-users-cog"></i> Manage Users</a>
+        <a href="../admin/create-fee.php"><i class="fas fa-file-invoice-dollar"></i> Create Fee</a>
+        <a href="../admin/reports.php"><i class="fas fa-chart-bar"></i> View Reports</a>
+        <a href="../auth/logout.php" class="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
       </nav>
 
       <div class="profile">
-        <img src="../assets/img/user.jpg" alt="Parent">
-        <div class="name"><?= htmlspecialchars($parent_name) ?></div>
-        <div class="email"><?= htmlspecialchars($parent_email) ?></div>
+        <img src="../../assets/img/user.jpg" alt="Admin" />
+        <div class="name"><?= htmlspecialchars($admin_name) ?></div>
+         <div class="email"><?= htmlspecialchars($admin_email) ?></div>
 
         <!-- Settings & Logout -->
         <div class="profile-actions">
@@ -38,7 +40,7 @@ $parent_email = $_SESSION['parent_email'] ?? 'parent@example.com';
             <i class="fas fa-cog" id="settingsToggle"></i>
             <div class="settings-dropdown" id="settingsMenu">
               <label>
-                <input type="checkbox" id="darkModeToggle">
+                <input type="checkbox" id="darkModeToggle" />
                 Dark Mode
               </label>
               <label>
@@ -59,8 +61,8 @@ $parent_email = $_SESSION['parent_email'] ?? 'parent@example.com';
     <main class="main">
       <header class="header">
         <div>
-          <h2>Property Dashboard</h2>
-          <p>Welcome, <?= htmlspecialchars($parent_name) ?>!</p>
+          <h2>Admin Dashboard</h2>
+          <p>Welcome, <?= htmlspecialchars($admin_name) ?>!</p>
         </div>
         <div class="actions">
           <div class="notification">
@@ -68,19 +70,18 @@ $parent_email = $_SESSION['parent_email'] ?? 'parent@example.com';
             <div class="notification-dropdown" id="notificationDropdown">
               <p><strong>Notifications</strong></p>
               <ul>
-                <li>Child attendance updated.</li>
-                <li>New message from teacher.</li>
+                <li>System maintenance scheduled.</li>
+                <li>New user registrations pending approval.</li>
               </ul>
             </div>
           </div>
-        </div>
       </header>
 
       <section class="cards">
-        <div class="card"><h3>Child Progress</h3><p>80%</p></div>
-        <div class="card"><h3>Attendance Record</h3><p>95%</p></div>
-        <div class="card"><h3>Fee Payment</h3><p>$1,200</p></div>
-        <div class="card"><h3>Teacher Messages</h3><p>4</p></div>
+        <div class="card">Total Students</div>
+        <div class="card">Total Teachers</div>
+        <div class="card">Reports & Feedback</div>
+        <div class="card">Fee Collection</div>
       </section>
     </main>
   </div>
