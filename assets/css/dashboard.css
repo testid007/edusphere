@@ -53,7 +53,8 @@ body {
   gap: 12px;
 }
 
-.nav a {
+.nav a,
+.nav-link {
   text-decoration: none;
   font-size: 16px;
   color: #555;
@@ -63,11 +64,14 @@ body {
 }
 
 .nav a:hover,
-.nav a.active {
+.nav-link:hover,
+.nav a.active,
+.nav-link.active {
   background-color: #000;
   color: #fff;
   cursor: pointer;
 }
+
 
 /* ======== Profile Section ======== */
 .profile {
@@ -460,7 +464,7 @@ body {
 .fee-status-header h2 {
   margin-bottom: 6px;
   font-weight: 700;
-  color: #2a7a2a;
+  color: #111;
 }
 
 .fee-status-header p {
@@ -501,7 +505,7 @@ body {
 .fee-details thead th {
   background-color: #e2f0e2;
   font-weight: 700;
-  color: #2a7a2a;
+  color: #111;
 }
 
 .fee-details tbody tr:last-child td {
@@ -512,7 +516,7 @@ body {
 .fee-status-badge {
   display: inline-block;
   padding: 8px 24px;
-  background-color: #28a745;
+  background-color: #111;
   color: white;
   font-weight: 700;
   border-radius: 25px;
@@ -562,7 +566,7 @@ body {
 /* Sent messages (right aligned) */
 .message.sent {
   background: #daf5d8;
-  border-left: 6px solid #4caf50;
+  border-left: 6px solid #111;
   align-self: flex-end;
   color: #2f4f2f;
   box-shadow: 0 4px 14px rgba(76,175,80,0.25);
@@ -578,7 +582,7 @@ body {
 
 /* Highlight sender's name */
 .message strong {
-  color: #4caf50;
+  color: #111;
   font-weight: 700;
 }
 
@@ -625,14 +629,14 @@ body {
 
 .message-form textarea:focus {
   outline: none;
-  border-color: #4caf50;
+  border-color: #111;
   box-shadow: 0 0 10px rgba(76,175,80,0.6);
 }
 
 /* Send button */
 .btn-send {
   align-self: flex-start;
-  background: linear-gradient(135deg, #4caf50, #388e3c);
+  background: linear-gradient(135deg, #111, #111);
   color: #fff;
   font-weight: 700;
   border: none;

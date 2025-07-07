@@ -169,7 +169,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <body>
   <div class="main-container">
     <div class="left-section">
-      <img src="../assets/img/sitelogo.png" class="logo-img" alt="Logo" />
+      <img src="../assets/img/logo.png" class="logo-img" alt="Logo" />
       <h2>Welcome to EduSphere</h2>
       <p><strong>Please fill out the form to create an account</strong></p>
       <a href="login.php"><button class="login-btn">Go to Login</button></a>
