@@ -1,51 +1,50 @@
-/* Global */
-* {
+/* ======== Global Styles ======== */
+*,
+*::before,
+*::after {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
-  font-family: 'Inter', sans-serif;
 }
 
 body {
+  font-family: 'Inter', sans-serif;
   background: linear-gradient(to right, #eafbf1, #e6f0ff);
+  color: #2c2c2c;
   display: flex;
   height: 100vh;
-  color: #2c2c2c;
-  transition: background 0.3s, color 0.3s;
+  overflow: hidden;
+  transition: background 0.3s ease, color 0.3s ease;
 }
 
 .container {
   display: flex;
   width: 100%;
+  height: 100vh;
 }
 
-/* Sidebar */
+/* ======== Sidebar ======== */
 .sidebar {
-  background-color: #ffffff;
+  background-color: #fff;
   width: 240px;
   padding: 30px 20px;
   box-shadow: 0 0 15px rgba(0, 0, 0, 0.05);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  user-select: none;
 }
 
 .logo {
-  font-size: 22px;
-  font-weight: bold;
-  color: #2c2c2c;
-  margin-bottom: 40px;
   display: flex;
-  align-items: center;
-  gap: 10px;
+  justify-content: center;
+  margin-bottom: 40px;
 }
 
 .logo img {
   width: 90px;
-  height: 60px;
-  align-items: center;
-  display: flex;
-  margin-left: 30px;
+  height: auto;
+  object-fit: contain;
 }
 
 .nav {
@@ -60,26 +59,28 @@ body {
   color: #555;
   padding: 12px 16px;
   border-radius: 10px;
-  transition: 0.3s;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 .nav a:hover,
 .nav a.active {
   background-color: #000;
   color: #fff;
+  cursor: pointer;
 }
 
-/* Profile section */
+/* ======== Profile Section ======== */
 .profile {
   text-align: center;
   margin-top: auto;
+  user-select: none;
 }
 
 .profile img {
   width: 100px;
   height: 100px;
   border-radius: 50%;
-  border: 3px solid #4caf50; /* A fresh green accent */
+  border: 3px solid #4caf50;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
   margin-bottom: 12px;
   transition: transform 0.3s ease, box-shadow 0.3s ease;
@@ -90,20 +91,21 @@ body {
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
 }
 
-
 .profile .name {
   font-weight: 600;
   font-size: 14px;
   color: #333;
+  user-select: text;
 }
 
 .profile .email {
   font-size: 12px;
   color: #888;
   margin-bottom: 10px;
+  user-select: text;
 }
 
-/* Settings + Logout Icons */
+/* Settings & Logout Icons */
 .profile-actions {
   display: flex;
   justify-content: center;
@@ -112,23 +114,25 @@ body {
   position: relative;
 }
 
-.profile-actions i {
-  cursor: pointer;
+.profile-actions i,
+.logout-icon i {
   font-size: 18px;
   color: #555;
-  transition: 0.2s;
+  cursor: pointer;
+  transition: color 0.2s ease;
 }
 
-.profile-actions i:hover {
+.profile-actions i:hover,
+.logout-icon i:hover {
   color: #000;
 }
 
-/* Settings dropdown */
+/* Settings Dropdown */
 .settings-dropdown {
   position: absolute;
   bottom: 40px;
   left: -10px;
-  background: white;
+  background: #fff;
   border-radius: 10px;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
   width: 180px;
@@ -139,35 +143,41 @@ body {
   z-index: 100;
 }
 
+.settings-dropdown.show {
+  display: flex !important;
+}
+
 .settings-dropdown label {
-  display: block;
+  cursor: pointer;
   margin-bottom: 10px;
+  display: block;
 }
 
 .settings-dropdown select {
   width: 100%;
   padding: 5px;
   border-radius: 6px;
+  border: 1px solid #ccc;
+  font-size: 14px;
 }
 
-.settings-dropdown.show {
-  display: flex !important;
-}
-
-/* Main content */
+/* ======== Main Content ======== */
 .main {
   flex: 1;
-  padding: 30px 40px;
-  overflow-y: auto;
   background-color: #fafafa;
+  padding: 30px 40px;
   border-radius: 30px 0 0 30px;
+  overflow-y: auto;
+  height: 100vh;
+  box-sizing: border-box;
+  user-select: text;
 }
 
-/* Header */
 .header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin-bottom: 30px;
 }
 
 .header h2 {
@@ -180,61 +190,20 @@ body {
   color: #666;
 }
 
-/* Action icons */
+/* Actions - Notifications */
 .actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
   position: relative;
 }
 
-.icon-btn {
-  background: #fff;
-  border: none;
-  border-radius: 12px;
-  padding: 10px;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-  font-size: 16px;
-}
-
-/* Cards Section */
-.cards {
-  display: flex;
-  gap: 20px;
-  margin-top: 30px;
-  flex-wrap: wrap;
-}
-
-.card {
-  flex: 1;
-  min-width: 250px;
-  background-color: #fff;
-  border-radius: 16px;
-  padding: 20px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.05);
-  transition: 0.3s;
-}
-
-.card:hover {
-  transform: translateY(-4px);
-}
-
-.card h3 {
-  font-size: 16px;
-  font-weight: 600;
-  margin-bottom: 10px;
-}
-
-.card p {
-  font-size: 22px;
-  font-weight: bold;
-}
-
-/* Notification dropdown */
 .notification {
-  position: relative;
+  font-size: 20px;
+  color: #555;
   cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.notification:hover {
+  color: #000;
 }
 
 .notification-dropdown {
@@ -242,12 +211,13 @@ body {
   position: absolute;
   top: 30px;
   right: 0;
-  background: white;
+  background: #fff;
   padding: 15px;
-  width: 220px;
-  box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+  width: 240px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
   border-radius: 10px;
   z-index: 100;
+  user-select: text;
 }
 
 .notification-dropdown.show {
@@ -257,49 +227,749 @@ body {
 .notification-dropdown p {
   font-weight: 600;
   margin-bottom: 10px;
+  color: #333;
 }
 
 .notification-dropdown ul {
   list-style: none;
-  padding: 0;
+  padding-left: 0;
 }
 
 .notification-dropdown ul li {
   font-size: 14px;
-  padding: 5px 0;
+  padding: 6px 0;
   border-bottom: 1px solid #eee;
+  color: #444;
 }
 
-/* Dark mode styles */
-body.dark-mode {
-  background: #1e1e2f;
+.notification-dropdown ul li:last-child {
+  border-bottom: none;
+}
+
+/* ======== Cards ======== */
+.cards {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.card {
+  background-color: #fff;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.05);
+  flex: 1 1 220px;
+  cursor: default;
+  transition: transform 0.3s ease;
+}
+
+.card:hover {
+  transform: translateY(-4px);
+}
+
+.card h3 {
+  font-size: 16px;
+  font-weight: 800;
+  margin-bottom: 10px;
+  color: #333;
+}
+
+.card p {
+  font-size: 22px;
+  font-weight: 400;
+  color: #111;
+}
+
+/* ======== Tables ======== */
+.performance-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 12px;
+  margin-top: 24px;
+  font-size: 15px;
+  color: #444;
+  background: transparent;
+}
+
+.performance-table thead tr {
+  background-color: transparent;
+  color: #555;
+}
+
+.performance-table thead th {
+  padding: 14px 20px;
+  font-weight: 700;
+  color: #4caf50;
+  border-bottom: 2px solid #4caf50;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-align: left;
+}
+
+.performance-table tbody tr {
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  border-radius: 12px;
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  cursor: default;
+}
+
+.performance-table tbody tr:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 6px 20px rgba(76, 175, 80, 0.3);
+}
+
+.performance-table tbody td {
+  padding: 16px 20px;
+  border: none;
+}
+
+/* ======== Fee Status ======== */
+body {
+  background: #f5f7fa !important;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  height: 100vh;
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  color: #333 !important;
+}
+
+/* Main container styling */
+.fee-status-container {
+  background: #fff;
+  width: 480px;
+  max-width: 90vw;
+  border-radius: 12px;
+  box-shadow: 0 12px 25px rgba(0, 0, 0, 0.12);
+  padding: 30px 40px;
+  box-sizing: border-box;
+}
+
+/* ======= Header Section ======= */
+.fee-status-header {
+  text-align: center;
+  margin-bottom: 25px;
+  border-bottom: 2px solid #4a76a8;
+  padding-bottom: 15px;
+}
+
+.fee-status-header h2 {
+  margin: 0;
+  font-weight: 700;
+  font-size: 26px;
+  color: #4a76a8;
+  letter-spacing: 1px;
+}
+
+.fee-status-header p {
+  margin: 5px 0 0;
+  color: #777;
+  font-size: 14px;
+}
+
+/* ======= Student Info Section ======= */
+.student-info {
+  margin-bottom: 25px;
+}
+
+.student-info .info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid #eaeaea;
+}
+
+.student-info .info-row:last-child {
+  border-bottom: none;
+}
+
+.student-info .label {
+  font-weight: 600;
+  color: #555;
+}
+
+.student-info .value {
+  font-weight: 500;
+  color: #222;
+}
+
+/* ======= Fee Details Table ======= */
+.fee-details {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 30px;
+  font-size: 15px;
+}
+
+.fee-details thead tr {
+  background-color: #4a76a8;
+  color: white;
+  text-align: left;
+  font-weight: 600;
+}
+
+.fee-details th,
+.fee-details td {
+  padding: 12px 15px;
+  border-bottom: 1px solid #ddd;
+}
+
+.fee-details tbody tr:last-child td {
+  border-bottom: 2px solid #4a76a8;
+  font-weight: 700;
+  color: #4a76a8;
+}
+
+/* ======= Fee Status Badge ======= */
+.fee-status-badge {
+  display: inline-block;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 20px;
   color: #fff;
+  background-color: #4caf50; /* Green for paid */
+  box-shadow: 0 3px 8px rgba(76, 175, 80, 0.4);
+  user-select: none;
+}
+
+.fee-status-badge.pending {
+  background-color: #f44336; /* Red for pending */
+  box-shadow: 0 3px 8px rgba(244, 67, 54, 0.4);
+}
+/* Fee Receipt styles Student Dashboard*/
+.fee-status-container {
+  max-width: 480px;
+  margin: 40px auto;
+  background: #fff;
+  padding: 20px 30px;
+  border-radius: 10px;
+  box-shadow: 0 0 15px rgba(0,0,0,0.1);
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  color: #333;
+}
+
+.fee-status-header {
+  text-align: center;
+  margin-bottom: 25px;
+}
+
+.fee-status-header h2 {
+  margin-bottom: 6px;
+  font-weight: 700;
+  color: #2a7a2a;
+}
+
+.fee-status-header p {
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.student-info {
+  margin-bottom: 25px;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid #eee;
+  font-size: 0.95rem;
+}
+
+.info-row .label {
+  font-weight: 600;
+  color: #555;
+}
+
+.fee-details {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 20px;
+}
+
+.fee-details th, .fee-details td {
+  border: 1px solid #ddd;
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 0.95rem;
+}
+
+.fee-details thead th {
+  background-color: #e2f0e2;
+  font-weight: 700;
+  color: #2a7a2a;
+}
+
+.fee-details tbody tr:last-child td {
+  font-weight: 700;
+  border-top: 2px solid #2a7a2a;
+}
+
+.fee-status-badge {
+  display: inline-block;
+  padding: 8px 24px;
+  background-color: #28a745;
+  color: white;
+  font-weight: 700;
+  border-radius: 25px;
+  font-size: 1rem;
+  letter-spacing: 1px;
+  user-select: none;
+}
+
+.fee-status-footer {
+  text-align: center;
+  margin-top: 30px;
+  font-style: italic;
+  color: #555;
+  font-size: 0.9rem;
+}
+
+/* ======= Footer Note ======= */
+.fee-status-footer {
+  text-align: center;
+  color: #999;
+  font-size: 13px;
+  margin-top: 10px;
+  user-select: none;
+}
+/* ====== Communication Messages ====== */
+.messages {
+  max-width: 620px;
+  margin-bottom: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* Message base style */
+.message {
+  max-width: 80%;
+  padding: 16px 22px;
+  border-radius: 20px;
+  font-size: 15px;
+  line-height: 1.5;
+  word-wrap: break-word;
+  box-shadow: 0 3px 8px rgba(0,0,0,0.08);
+  position: relative;
+  transition: box-shadow 0.3s ease, background-color 0.3s ease;
+}
+
+/* Sent messages (right aligned) */
+.message.sent {
+  background: #daf5d8;
+  border-left: 6px solid #4caf50;
+  align-self: flex-end;
+  color: #2f4f2f;
+  box-shadow: 0 4px 14px rgba(76,175,80,0.25);
+}
+
+/* Received messages (left aligned) */
+.message.received {
+  background: #f9f9f9;
+  border-left: 6px solid #bbb;
+  color: #444;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+/* Highlight sender's name */
+.message strong {
+  color: #4caf50;
+  font-weight: 700;
+}
+
+/* Date below message */
+.msg-date {
+  font-size: 12px;
+  color: #999;
+  font-style: italic;
+  margin-top: 8px;
+  user-select: none;
+  text-align: right;
+}
+
+/* ====== Message Form ====== */
+.message-form {
+  max-width: 620px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  background: #fff;
+  padding: 20px 30px;
+  border-radius: 25px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+}
+
+.message-form label {
+  font-weight: 700;
+  font-size: 16px;
+  color: #333;
+  user-select: none;
+}
+
+.message-form textarea {
+  resize: vertical;
+  min-height: 100px;
+  padding: 18px 22px;
+  font-size: 16px;
+  border-radius: 25px;
+  border: 2px solid #ddd;
+  font-family: 'Inter', sans-serif;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.message-form textarea:focus {
+  outline: none;
+  border-color: #4caf50;
+  box-shadow: 0 0 10px rgba(76,175,80,0.6);
+}
+
+/* Send button */
+.btn-send {
+  align-self: flex-start;
+  background: linear-gradient(135deg, #4caf50, #388e3c);
+  color: #fff;
+  font-weight: 700;
+  border: none;
+  padding: 14px 36px;
+  border-radius: 30px;
+  cursor: pointer;
+  font-size: 16px;
+  box-shadow: 0 6px 12px rgba(72,148,59,0.4);
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+  user-select: none;
+}
+
+.btn-send:hover,
+.btn-send:focus {
+  background: linear-gradient(135deg, #388e3c, #2e7d32);
+  box-shadow: 0 8px 16px rgba(46,125,50,0.6);
+  outline: none;
+}
+
+/* Confirmation Text */
+.sent-confirmation {
+  margin-top: 14px;
+  font-weight: 700;
+  color: #4caf50;
+  font-size: 16px;
+  user-select: none;
+  animation: fadeInUp 0.6s ease forwards;
+}
+/* ======= Common Styles for Gradebook & Assignments Tables ======= */
+
+.table-container {
+  background: #ffffff;
+  padding: 30px 35px;
+  border-radius: 20px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1);
+  max-width: 1000px;
+  margin: 40px auto;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  color: #333;
+  user-select: text;
+}
+
+/* Table base styles */
+.gradebook-table,
+.assignments-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 12px;
+  font-size: 16px;
+  color: #444;
+}
+
+/* Table header */
+.gradebook-table thead tr,
+.assignments-table thead tr {
+  background-color: #111; /* Dark green */
+  color: #e0f2f1; /* Pale aqua */
+  font-weight: 700;
+  border-radius: 12px;
+  box-shadow: 0 3px 6px rgba(46, 125, 50, 0.3);
+}
+
+/* Header cells */
+.gradebook-table thead th,
+.assignments-table thead th {
+  padding: 14px 20px;
+  text-align: left;
+  user-select: none;
+  position: relative;
+  border: none;
+}
+
+/* Rounded corners on first and last header cells */
+.gradebook-table thead th:first-child,
+.assignments-table thead th:first-child {
+  border-top-left-radius: 12px;
+  border-bottom-left-radius: 12px;
+}
+
+.gradebook-table thead th:last-child,
+.assignments-table thead th:last-child {
+  border-top-right-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+
+/* Table body rows */
+.gradebook-table tbody tr,
+.assignments-table tbody tr {
+  background: #f9fafb;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  border-radius: 12px;
+  transition: background-color 0.25s ease;
+}
+
+.gradebook-table tbody tr:hover,
+.assignments-table tbody tr:hover {
+  background-color: #e6f4ea;
+  cursor: default;
+}
+
+/* Table body cells */
+.gradebook-table tbody td,
+.assignments-table tbody td {
+  padding: 14px 20px;
+  border: none;
+  vertical-align: middle;
+}
+
+/* Rounded corners for first and last cells in rows */
+.gradebook-table tbody td:first-child,
+.assignments-table tbody td:first-child {
+  border-top-left-radius: 12px;
+  border-bottom-left-radius: 12px;
+  font-weight: 600;
+}
+
+.gradebook-table tbody td:last-child,
+.assignments-table tbody td:last-child {
+  border-top-right-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+
+/* Grade column styling */
+.gradebook-table tbody td.grade {
+  font-weight: 700;
+  color: #111; /* dark green */
+  text-align: center;
+  user-select: none;
+}
+
+/* Assignment status badges */
+.assignments-table tbody td.status {
+  text-align: center;
+  font-weight: 700;
+  padding: 8px 14px;
+  border-radius: 20px;
+  color: white;
+  user-select: none;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Status colors */
+.assignments-table tbody td.status.pending {
+  background-color: #111; /* Red */
+}
+
+.assignments-table tbody td.status.submitted {
+  background-color: #111; /* Green */
+}
+
+.assignments-table tbody td.status.graded {
+  background-color: #111; /* Blue */
+}
+
+/* Buttons styling */
+.btn-edit,
+.btn-delete {
+  background: transparent;
+  border: 2px solid transparent;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.25s ease, border-color 0.25s ease;
+  user-select: none;
+  margin-right: 6px;
+}
+
+.btn-edit {
+  color: #111;
+  border-color: #111;
+}
+
+.btn-edit:hover {
+  background-color: #111;
+  color: #e0f2f1;
+}
+
+.btn-delete {
+  color: #d32f2f;
+  border-color: #d32f2f;
+}
+
+.btn-delete:hover {
+  background-color: #d32f2f;
+  color: #fff;
+}
+
+/* Responsive table for mobile */
+@media (max-width: 768px) {
+  .table-container {
+    padding: 20px 15px;
+    margin: 20px 10px;
+  }
+
+  .gradebook-table thead,
+  .assignments-table thead {
+    display: none; /* Hide header on small screens */
+  }
+
+  .gradebook-table tbody tr,
+  .assignments-table tbody tr {
+    display: block;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.07);
+    border-radius: 14px;
+    background: #fff;
+  }
+
+  .gradebook-table tbody td,
+  .assignments-table tbody td {
+    display: flex;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid #eee;
+  }
+
+  .gradebook-table tbody td:last-child,
+  .assignments-table tbody td:last-child {
+    border-bottom: none;
+  }
+
+  .gradebook-table tbody td::before,
+  .assignments-table tbody td::before {
+    content: attr(data-label);
+    font-weight: 700;
+    color: #555;
+    flex-basis: 45%;
+    user-select: none;
+  }
+
+  .gradebook-table tbody td.grade,
+  .assignments-table tbody td.status {
+    text-align: right;
+    font-weight: 700;
+  }
+
+  .btn-edit, .btn-delete {
+    margin-right: 0;
+    padding: 5px 10px;
+    font-size: 13px;
+  }
+}
+/* Attendence Summary Table */
+ .attendance-summary {
+      margin-top: 30px;
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .attendance-summary th, .attendance-summary td {
+      border: 1px solid #ddd;
+      padding: 8px 12px;
+      text-align: center;
+    }
+    .attendance-summary thead {
+      background-color: #e2f0e2;
+      font-weight: 700;
+      color: #111;
+    }
+/* Animation */
+@keyframes fadeInUp {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ======== Dark Mode ======== */
+body.dark-mode {
+  background: #1e1e2f !important;
+  color: #ddd !important;
 }
 
 body.dark-mode .main {
   background-color: #2a2a3b;
+  color: #ddd;
 }
 
 body.dark-mode .sidebar,
 body.dark-mode .card,
-body.dark-mode .icon-btn,
 body.dark-mode .settings-dropdown,
 body.dark-mode .notification-dropdown {
   background-color: #2a2a3b;
-  color: #fff;
+  color: #ddd;
 }
 
 body.dark-mode .nav a {
-  color: #ccc;
+  color: #bbb;
 }
 
 body.dark-mode .nav a.active,
 body.dark-mode .nav a:hover {
-  background-color: #fff;
-  color: #000;
+  background-color: #4caf50;
+  color: #fff;
 }
 
 body.dark-mode .profile .email,
 body.dark-mode .profile .name {
   color: #eee;
+}
+
+body.dark-mode .performance-table thead {
+  background-color: #4caf50;
+}
+
+body.dark-mode .performance-table tbody tr:nth-child(even) {
+  background-color: #384048;
+}
+
+body.dark-mode .performance-table tbody tr:hover {
+  background-color: #3f534d;
+}
+
+body.dark-mode .btn-pay,
+body.dark-mode .btn-send {
+  background-color: #4caf50;
+  color: #fff;
+}
+
+body.dark-mode .btn-pay:hover,
+body.dark-mode .btn-send:hover {
+  background-color: #3a8e3a;
+}
+
+body.dark-mode .message.sent {
+  background-color: #2e4a2e;
+  border-color: #4caf50;
+}
+
+body.dark-mode .message.received {
+  background-color: #3c3f4a;
+  border-color: #666;
 }
