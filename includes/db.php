@@ -1,23 +1,18 @@
 <?php
-// Database connection file
+// Database connection using config values
 
-$host = 'localhost';
-$db   = 'edusphere';
-$user = 'root';
-$pass = '';
-$charset = 'utf8mb4';
+require_once 'config.php'; // Adjust path if needed
 
-$dsn = "mysql:host=$host;dbname=$db;charset=$charset";
+$dsn = "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=" . DB_CHARSET;
 
 $options = [
-    PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION, // Show exceptions
+    PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
     PDO::ATTR_EMULATE_PREPARES   => false,
 ];
 
 try {
-    $conn = new PDO($dsn, $user, $pass, $options);
+    $conn = new PDO($dsn, DB_USER, DB_PASS, $options);
 } catch (PDOException $e) {
-    // Stop and display error
     die("Database connection failed: " . $e->getMessage());
 }

@@ -4,6 +4,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const classRow = document.getElementById("class-row");
   const dobRow = document.getElementById("dob-row");
   const parentExtra = document.getElementById("parent-extra");
+  const secretCodeRow = document.getElementById("secret-code-row");
   const passwordInput = document.getElementById("password");
   const strengthText = document.getElementById("password-strength-text");
 
@@ -18,6 +19,58 @@ document.addEventListener("DOMContentLoaded", () => {
     if (score <= 2) return "Weak";
     if (score === 3 || score === 4) return "Medium";
     return "Strong";
+  };
+
+  const updateFieldRequirements = (role) => {
+    if (role === "Student") {
+      classRow.style.display = "";
+      dobRow.style.display = "";
+      parentExtra.style.display = "none";
+      secretCodeRow.style.display = "none";
+
+      classRow.querySelector("select").setAttribute("required", "required");
+      dobRow.querySelector("input").setAttribute("required", "required");
+      parentExtra
+        .querySelectorAll("input")
+        .forEach((input) => input.removeAttribute("required"));
+      secretCodeRow.querySelector("input").removeAttribute("required");
+    } else if (role === "Parent") {
+      classRow.style.display = "none";
+      dobRow.style.display = "none";
+      parentExtra.style.display = "";
+      secretCodeRow.style.display = "none";
+
+      parentExtra
+        .querySelectorAll("input")
+        .forEach((input) => input.setAttribute("required", "required"));
+      classRow.querySelector("select").removeAttribute("required");
+      dobRow.querySelector("input").removeAttribute("required");
+      secretCodeRow.querySelector("input").removeAttribute("required");
+    } else if (role === "Teacher" || role === "Admin") {
+      classRow.style.display = "none";
+      dobRow.style.display = "none";
+      parentExtra.style.display = "none";
+      secretCodeRow.style.display = "";
+
+      classRow.querySelector("select").removeAttribute("required");
+      dobRow.querySelector("input").removeAttribute("required");
+      parentExtra
+        .querySelectorAll("input")
+        .forEach((input) => input.removeAttribute("required"));
+      secretCodeRow.querySelector("input").setAttribute("required", "required");
+    } else {
+      classRow.style.display = "none";
+      dobRow.style.display = "none";
+      parentExtra.style.display = "none";
+      secretCodeRow.style.display = "none";
+
+      classRow.querySelector("select").removeAttribute("required");
+      dobRow.querySelector("input").removeAttribute("required");
+      parentExtra
+        .querySelectorAll("input")
+        .forEach((input) => input.removeAttribute("required"));
+      secretCodeRow.querySelector("input").removeAttribute("required");
+    }
   };
 
   passwordInput.addEventListener("input", () => {
@@ -36,13 +89,14 @@ document.addEventListener("DOMContentLoaded", () => {
     button.addEventListener("click", () => {
       roleButtons.forEach((btn) => btn.classList.remove("active"));
       button.classList.add("active");
-      const selectedRole = button.textContent;
+
+      const selectedRole = button.textContent.trim();
       roleInput.value = selectedRole;
 
-      // Toggle relevant fields
-      classRow.style.display = selectedRole === "Student" ? "" : "none";
-      dobRow.style.display = selectedRole === "Student" ? "" : "none";
-      parentExtra.style.display = selectedRole === "Parent" ? "" : "none";
+      updateFieldRequirements(selectedRole);
     });
   });
+
+  // Run on page load to reflect preselected role
+  updateFieldRequirements(roleInput.value);
 });
