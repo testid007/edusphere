@@ -9,7 +9,9 @@ class ScheduleManager {
         $this->conn = $conn;
     }
 
-    // Fetch schedule for a class
+    /**
+     * ✅ Fetch schedule entries for a class/grade
+     */
     public function getClassSchedule($grade) {
         $stmt = $this->conn->prepare("
             SELECT se.id, se.day, ts.period_name, ts.start_time, ts.end_time,
@@ -29,21 +31,25 @@ class ScheduleManager {
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    // Get all teachers with their assigned subjects
+    /**
+     * ✅ Get all teachers with their assigned subjects (for overview)
+     */
     public function getTeachersWithSubjects() {
         $stmt = $this->conn->query("
             SELECT u.id, CONCAT(u.first_name, ' ', u.last_name) AS name,
                    GROUP_CONCAT(ss.name SEPARATOR ', ') AS subjects
             FROM users u
-            JOIN schedule_teacher_subjects sts ON u.id = sts.user_id
-            JOIN schedule_subjects ss ON sts.subject_id = ss.id
+            LEFT JOIN schedule_teacher_subjects sts ON u.id = sts.user_id
+            LEFT JOIN schedule_subjects ss ON sts.subject_id = ss.id
             WHERE u.role = 'Teacher'
             GROUP BY u.id
         ");
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    // Insert or update a schedule entry
+    /**
+     * ✅ Insert or update a schedule entry
+     */
     public function saveScheduleEntry($id, $class, $day, $time_slot_id, $subject_id, $user_id, $is_special = 0, $special_name = null) {
         if ($id) {
             // Update existing entry
@@ -63,37 +69,48 @@ class ScheduleManager {
         }
     }
 
-    // Delete a schedule entry by ID
+    /**
+     * ✅ Delete a schedule entry
+     */
     public function deleteScheduleEntry($id) {
         $stmt = $this->conn->prepare("DELETE FROM schedule_entries WHERE id = ?");
         return $stmt->execute([$id]);
     }
 
-    // Check if teacher is double-booked for a day/time_slot
+    /**
+     * ✅ Check if a teacher is already booked on a time slot
+     */
     public function isTeacherBooked($teacher_id, $day, $time_slot_id, $exclude_entry_id = null) {
         $sql = "SELECT COUNT(*) FROM schedule_entries WHERE user_id = ? AND day = ? AND time_slot_id = ?";
         $params = [$teacher_id, $day, $time_slot_id];
+
         if ($exclude_entry_id) {
             $sql .= " AND id != ?";
             $params[] = $exclude_entry_id;
         }
+
         $stmt = $this->conn->prepare($sql);
         $stmt->execute($params);
         return $stmt->fetchColumn() > 0;
     }
 
-    // Fetch all subjects for a grade range (e.g., "1-3")
+    /**
+     * ✅ Get subjects allowed for a particular grade
+     */
     public function getSubjectsByGrade($grade) {
         $stmt = $this->conn->prepare("
             SELECT * FROM schedule_subjects
-            WHERE FIND_IN_SET(?, grade_range) OR grade_range LIKE CONCAT(?, '-%') OR grade_range LIKE CONCAT('%-', ?)
+            WHERE 
+              CAST(SUBSTRING_INDEX(grade_range, '-', 1) AS UNSIGNED) <= ? 
+              AND CAST(SUBSTRING_INDEX(grade_range, '-', -1) AS UNSIGNED) >= ?
         ");
-        // This query might need tweaking depending on your grade_range format
-        $stmt->execute([$grade, $grade, $grade]);
+        $stmt->execute([$grade, $grade]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    // Fetch time slots (optionally for Friday special)
+    /**
+     * ✅ Get all time slots (normal or Friday special)
+     */
     public function getTimeSlots($fridaySpecial = false) {
         if ($fridaySpecial) {
             $stmt = $this->conn->prepare("SELECT * FROM schedule_time_slots WHERE is_friday_special = 1 ORDER BY start_time");
@@ -102,6 +119,53 @@ class ScheduleManager {
         }
         $stmt->execute();
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * ✅ Get all teachers for dropdown
+     */
+    public function getAllTeachers() {
+        $stmt = $this->conn->prepare("
+            SELECT id, CONCAT(first_name, ' ', last_name) AS name
+            FROM users
+            WHERE role = 'Teacher'
+        ");
+        $stmt->execute();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * ✅ Get all available subjects
+     */
+    public function getAllSubjects() {
+        $stmt = $this->conn->query("SELECT id, name FROM schedule_subjects ORDER BY name");
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * ✅ Assign multiple subjects to a teacher
+     * First deletes old assignments and saves the new ones
+     */
+    public function assignSubjectsToTeacher($teacherId, $subjectIds) {
+        // Validate input
+        if (!$teacherId || !is_array($subjectIds)) {
+            return false;
+        }
+
+        // Delete old subject assignments
+        $stmt = $this->conn->prepare("DELETE FROM schedule_teacher_subjects WHERE user_id = ?");
+        $stmt->execute([$teacherId]);
+
+        // Insert new subject assignments
+        $stmt = $this->conn->prepare("INSERT INTO schedule_teacher_subjects (user_id, subject_id) VALUES (?, ?)");
+
+        foreach ($subjectIds as $subjectId) {
+            if (!empty($subjectId)) {
+                $stmt->execute([$teacherId, $subjectId]);
+            }
+        }
+
+        return true;
     }
 }
 ?>

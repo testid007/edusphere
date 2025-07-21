@@ -24,6 +24,7 @@ $admin_name = $_SESSION['admin_name'] ?? 'Admin';
         <a href="#" data-page="manage-users"><i class="fas fa-users-cog"></i> Manage Users</a>
         <a href="#" data-page="create-fee"><i class="fas fa-file-invoice-dollar"></i> Create Fee</a>
         <a href="#" data-page="reports"><i class="fas fa-chart-bar"></i> View Reports</a>
+        <a href="#" data-page="manage-teacher-subjects"><i class="fas fa-calendar-alt"></i> Manage Teacher subjects</a>
         <a href="#" data-page="manage-schedule"><i class="fas fa-calendar-alt"></i> Manage Schedule</a>
         <a href="#" data-page="schedule-view"><i class="fas fa-eye"></i> Schedule View</a>
         <a href="../../auth/logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a>
