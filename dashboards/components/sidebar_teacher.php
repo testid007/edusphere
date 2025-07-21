@@ -15,7 +15,8 @@
     <a href="schedule.php"><i class="fas fa-user-check"></i> Schedule</a>
     <a href="gradebook.php"><i class="fas fa-book-open"></i> Grade Book</a>
     <a href="attendance.php"><i class="fas fa-user-check"></i> Attendance</a>
-    <a href="../auth/logout.php" class="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+    <a href="communication.php"><i class="fas fa-comments"></i> Communication</a>
+    <a href="../../auth/logout.php" class="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
   </nav>
 
   <!-- Profile Section included inside Sidebar -->

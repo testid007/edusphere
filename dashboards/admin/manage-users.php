@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 <section class="section manage-users">
   <h3 style="margin-bottom: 20px;">Manage Users</h3>
   <div style="overflow-x: auto;">
@@ -165,4 +165,4 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 </body>
 </html>
->>>>>>> 3fd959ab9e594c5f97b64e8765b9e158a58a8c29
+

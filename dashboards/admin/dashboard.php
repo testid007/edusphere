@@ -21,10 +21,9 @@ $admin_name = $_SESSION['admin_name'] ?? 'Admin';
         <img src="../../assets/img/logo.png" alt="Logo" />
       </div>
       <nav class="nav">
-        <a href="#" class="active" data-page="dashboard-content"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
-        <a href="#" data-page="manage-users"><i class="fas fa-users-cog"></i> Manage Users</a>
-        <a href="#" data-page="create-fee"><i class="fas fa-file-invoice-dollar"></i> Create Fee</a>
-        const navLinks = document.querySelectorAll('.nav-link');
+        <a href="#" class="nav-link active" data-page="dashboard-content"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
+        <a href="#" class="nav-link" data-page="manage-users"><i class="fas fa-users-cog"></i> Manage Users</a>
+        <a href="#" class="nav-link" data-page="create-fee"><i class="fas fa-file-invoice-dollar"></i> Create Fee</a>
         <a href="../../auth/logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a>
       </nav>
 

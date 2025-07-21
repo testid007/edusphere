@@ -73,7 +73,17 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   };
 
-  passwordInput.addEventListener("input", () => {
+  function debounce(fn, delay) {
+  let timeout;
+  return function (...args) {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => fn.apply(this, args), delay);
+  };
+}
+
+passwordInput.addEventListener(
+  "input",
+  debounce(() => {
     const password = passwordInput.value;
     const strength = evaluateStrength(password);
     strengthText.textContent = `Password Strength: ${strength}`;
@@ -83,7 +93,9 @@ document.addEventListener("DOMContentLoaded", () => {
         : strength === "Medium"
         ? "orange"
         : "red";
-  });
+  }, 200)
+);
+
 
   roleButtons.forEach((button) => {
     button.addEventListener("click", () => {

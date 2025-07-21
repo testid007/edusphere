@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>EduSphere - Smart School Engagement & Management Portal</title>
+    <title>EduSphere - An Intelligent School Management Portal</title>
     <link rel="stylesheet" href="assets/css/style.css" />
   </head>
   <body>
@@ -13,7 +13,7 @@
   <img src="assets/img/logo.png" alt="EduSphere Logo" class="logo">
   <span class="brand-text">EduSphere</span>
 </div>
-    <p>Smart School Engagement & Management Portal</p>
+    <p>An Intelligent School Management Portal</p>
     <nav>
       <a href="auth/login.php">Login</a>
       <a href="auth/register.php">Register</a>

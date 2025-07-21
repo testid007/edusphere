@@ -1,17 +1,41 @@
 <?php
 session_start();
-$student_name = $_SESSION['student_name'] ?? 'Ram Baban';  
-$class = 'Grade 10'; 
-$receipt_no = '#FEE2025001';
-$payment_date = date('F j, Y'); 
+require_once '../../includes/db.php';
 
-$fee_details = [
-  ['description' => 'Tuition Fee', 'amount' => 500.00],
-  ['description' => 'Library Fee', 'amount' => 50.00],
-  ['description' => 'Lab Fee', 'amount' => 30.00],
-];
-$total_paid = 580.00;
-$payment_status = 'Paid'; 
+// Use session values if set, otherwise fallback (for temporary debug or guest view)
+$student_id = $_SESSION['student_id'] ?? null;
+$student_name = $_SESSION['student_name'] ?? 'Guest Student';
+$class = $_SESSION['class'] ?? 'Grade 10';
+
+// Prepare receipt no and date
+if ($student_id) {
+    $receipt_no = '#FEE' . date('Y') . str_pad($student_id, 4, '0', STR_PAD_LEFT);
+} else {
+    $receipt_no = '#FEE' . date('Y') . '0000';
+}
+$payment_date = date('F j, Y');
+
+$fee_details = [];
+$total_paid = 0.00;
+
+if ($student_id) {
+    try {
+        $stmt = $conn->prepare("SELECT description, amount FROM fees WHERE student_id = :student_id AND class_name = :class_name");
+        $stmt->execute([
+            ':student_id' => $student_id,
+            ':class_name' => $class
+        ]);
+        
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $fee_details[] = $row;
+            $total_paid += $row['amount'];
+        }
+    } catch (PDOException $e) {
+        die("Error fetching fee data: " . $e->getMessage());
+    }
+}
+
+$payment_status = $total_paid > 0 ? 'Paid' : 'Pending';
 ?>
 
 <!DOCTYPE html>
@@ -36,13 +60,13 @@ $payment_status = 'Paid';
         <a href="assignments.php"><i class="fas fa-book"></i> My Assignments</a>
         <a href="results.php"><i class="fas fa-graduation-cap"></i> My Results</a>
         <a href="fees.php" class="active"><i class="fas fa-file-invoice-dollar"></i> Fee Details</a>
-        <a href="../auth/logout.php" class="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+        <a href="/edusphere/auth/logout.php" class="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
       </nav>
 
       <div class="profile">
         <img src="../../assets/img/user.jpg" alt="Student" />
         <div class="name"><?= htmlspecialchars($student_name) ?></div>
-        <div class="email"><?= htmlspecialchars($_SESSION['student_email'] ?? 'student@example.com') ?></div>
+        <div class="email"><?= htmlspecialchars($_SESSION['student_email'] ?? 'guest@example.com') ?></div>
       </div>
     </aside>
 
@@ -86,16 +110,20 @@ $payment_status = 'Paid';
             </tr>
           </thead>
           <tbody>
-            <?php foreach ($fee_details as $fee): ?>
+            <?php if (count($fee_details) > 0): ?>
+              <?php foreach ($fee_details as $fee): ?>
+                <tr>
+                  <td><?= htmlspecialchars($fee['description']) ?></td>
+                  <td>Rs.<?= number_format($fee['amount'], 2) ?></td>
+                </tr>
+              <?php endforeach; ?>
               <tr>
-                <td><?= htmlspecialchars($fee['description']) ?></td>
-                <td>Rs.<?= number_format($fee['amount'], 2) ?></td>
+                <td><strong>Total Paid</strong></td>
+                <td><strong>Rs. <?= number_format($total_paid, 2) ?></strong></td>
               </tr>
-            <?php endforeach; ?>
-            <tr>
-              <td>Total Paid</td>
-              <td>Rs. <?= number_format($total_paid, 2) ?></td>
-            </tr>
+            <?php else: ?>
+              <tr><td colspan="2">No fee records found.</td></tr>
+            <?php endif; ?>
           </tbody>
         </table>
 

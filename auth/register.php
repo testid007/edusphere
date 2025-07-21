@@ -36,7 +36,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $secretCode = $_POST['secret_code'] ?? '';
-
+    if (!preg_match('/^[A-Za-z\s]{2,}$/', $formData['firstName'])) {
+    $error = "Enter a valid First Name (letters only, min 2 chars)";
+} elseif (!preg_match('/^[A-Za-z\s]{2,}$/', $formData['lastName'])) {
+    $error = "Enter a valid Last Name (letters only, min 2 chars)";
+} elseif (!filter_var($formData['email'], FILTER_VALIDATE_EMAIL)) {
+    $error = "Enter a valid Email address";
+} elseif (!preg_match('/^\d{10}$/', $formData['phone'])) {
+    $error = "Enter a valid 10-digit Phone number";
+} elseif (
+    strlen($formData['password']) < 6 ||
+    !preg_match('/[A-Z]/', $formData['password']) ||
+    !preg_match('/[a-z]/', $formData['password']) ||
+    !preg_match('/[0-9]/', $formData['password']) ||
+    !preg_match('/[\W_]/', $formData['password'])
+) {
+    $error = "Password must be at least 6 characters and include uppercase, lowercase, number, and special character";
+} elseif ($formData['password'] !== $formData['confirmPassword']) {
+    $error = "Passwords do not match";
+} elseif (empty($formData['gender'])) {
+    $error = "Please select a Gender";
+} elseif (
+    empty($formData['firstName']) || empty($formData['lastName']) ||
+    empty($formData['email']) || empty($formData['phone']) ||
+    empty($formData['password']) || empty($formData['gender'])
+) {
+    $error = "Please fill in all required fields";
+} elseif ($formData['role'] === 'Student' && empty($formData['class'])) {
+    $error = "Please select a class for Student role";
+} elseif ($formData['role'] === 'Student' && empty($formData['dob'])) {
+    $error = "Please enter Date of Birth for Student";
+} elseif ($formData['role'] === 'Parent' && (empty($_POST['student_id']) || empty($formData['relationship']))) {
+    $error = "Please provide Student ID and relationship for Parent role";
+} elseif ($formData['role'] === 'Teacher' && $secretCode !== TEACHER_SECRET) {
+    $error = "Invalid secret code for Teacher";
+} elseif ($formData['role'] === 'Admin' && $secretCode !== ADMIN_SECRET) {
+    $error = "Invalid secret code for Admin";
+}
     if ($formData['password'] !== $formData['confirmPassword']) {
         $error = "Passwords do not match";
     } elseif (

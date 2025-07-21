@@ -29,7 +29,8 @@ $student_email = $_SESSION['student_email'] ?? 'student@example.com';
         <a href="assignments.php"><i class="fas fa-book"></i> My Assignments</a>
         <a href="results.php"><i class="fas fa-graduation-cap"></i> My Results</a>
         <a href="fees.php"><i class="fas fa-file-invoice-dollar"></i> Fee Details</a>
-        <a href="../auth/logout.php" class="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+        <a href="/edusphere/auth/logout.php" class="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+
       </nav>
 
       <div class="profile">
