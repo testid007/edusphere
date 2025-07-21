@@ -17,13 +17,14 @@ body {
   transition: background 0.3s ease, color 0.3s ease;
 }
 
+/* ======== Layout Containers ======== */
 .container {
   display: flex;
   width: 100%;
   height: 100vh;
 }
 
-/* ======== Sidebar ======== */
+/* ======== Sidebar General Styles ======== */
 .sidebar {
   background-color: #fff;
   width: 240px;
@@ -53,8 +54,7 @@ body {
   gap: 12px;
 }
 
-.nav a,
-.nav-link {
+.nav a {
   text-decoration: none;
   font-size: 16px;
   color: #555;
@@ -64,14 +64,11 @@ body {
 }
 
 .nav a:hover,
-.nav-link:hover,
-.nav a.active,
-.nav-link.active {
+.nav a.active {
   background-color: #000;
   color: #fff;
   cursor: pointer;
 }
-
 
 /* ======== Profile Section ======== */
 .profile {
@@ -185,7 +182,6 @@ body {
 }
 
 .header h2 {
-  color: #000;
   font-size: 26px;
   font-weight: 700;
 }
@@ -329,20 +325,7 @@ body {
   border: none;
 }
 
-/* ======== Fee Status ======== */
-body {
-  background: #f5f7fa !important;
-  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  height: 100vh;
-  display: flex !important;
-  justify-content: center !important;
-  align-items: center !important;
-  color: #333 !important;
-}
-
-/* Main container styling */
+/* ======== Fee Status Base ======== */
 .fee-status-container {
   background: #fff;
   width: 480px;
@@ -351,9 +334,11 @@ body {
   box-shadow: 0 12px 25px rgba(0, 0, 0, 0.12);
   padding: 30px 40px;
   box-sizing: border-box;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  color: #333;
+  margin: 40px auto;
 }
 
-/* ======= Header Section ======= */
 .fee-status-header {
   text-align: center;
   margin-bottom: 25px;
@@ -375,7 +360,6 @@ body {
   font-size: 14px;
 }
 
-/* ======= Student Info Section ======= */
 .student-info {
   margin-bottom: 25px;
 }
@@ -401,7 +385,6 @@ body {
   color: #222;
 }
 
-/* ======= Fee Details Table ======= */
 .fee-details {
   width: 100%;
   border-collapse: collapse;
@@ -428,7 +411,7 @@ body {
   color: #4a76a8;
 }
 
-/* ======= Fee Status Badge ======= */
+/* Fee Status Badge */
 .fee-status-badge {
   display: inline-block;
   padding: 6px 14px;
@@ -445,104 +428,7 @@ body {
   background-color: #f44336; /* Red for pending */
   box-shadow: 0 3px 8px rgba(244, 67, 54, 0.4);
 }
-/* Fee Receipt styles Student Dashboard*/
-.fee-status-container {
-  max-width: 480px;
-  margin: 40px auto;
-  background: #fff;
-  padding: 20px 30px;
-  border-radius: 10px;
-  box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
-  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-  color: #333;
-}
 
-.fee-status-header {
-  text-align: center;
-  margin-bottom: 25px;
-}
-
-.fee-status-header h2 {
-  margin-bottom: 6px;
-  font-weight: 700;
-  color: #111;
-}
-
-.fee-status-header p {
-  font-size: 0.9rem;
-  color: #666;
-}
-
-.student-info {
-  margin-bottom: 25px;
-}
-
-.info-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 6px 0;
-  border-bottom: 1px solid #eee;
-  font-size: 0.95rem;
-}
-
-.info-row .label {
-  font-weight: 600;
-  color: #555;
-}
-
-.fee-details {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 20px;
-}
-
-.fee-details th,
-.fee-details td {
-  border: 1px solid #ddd;
-  padding: 10px 12px;
-  text-align: left;
-  font-size: 0.95rem;
-}
-
-.fee-details thead th {
-  background-color: #e2f0e2;
-  font-weight: 700;
-  color: #111;
-}
-
-.fee-details tbody tr:last-child td {
-  font-weight: 700;
-  border-top: 2px solid #2a7a2a;
-}
-
-.fee-status-badge {
-  display: inline-block;
-  padding: 8px 24px;
-  background-color: #111;
-  color: white;
-  font-weight: 700;
-  border-radius: 25px;
-  font-size: 1rem;
-  letter-spacing: 1px;
-  user-select: none;
-}
-
-.fee-status-footer {
-  text-align: center;
-  margin-top: 30px;
-  font-style: italic;
-  color: #555;
-  font-size: 0.9rem;
-}
-
-/* ======= Footer Note ======= */
-.fee-status-footer {
-  text-align: center;
-  color: #999;
-  font-size: 13px;
-  margin-top: 10px;
-  user-select: none;
-}
 /* ====== Communication Messages ====== */
 .messages {
   max-width: 620px;
@@ -568,7 +454,7 @@ body {
 /* Sent messages (right aligned) */
 .message.sent {
   background: #daf5d8;
-  border-left: 6px solid #111;
+  border-left: 6px solid #4caf50;
   align-self: flex-end;
   color: #2f4f2f;
   box-shadow: 0 4px 14px rgba(76, 175, 80, 0.25);
@@ -584,7 +470,7 @@ body {
 
 /* Highlight sender's name */
 .message strong {
-  color: #111;
+  color: #4caf50;
   font-weight: 700;
 }
 
@@ -629,12 +515,16 @@ body {
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-
+.message-form textarea:focus {
+  outline: none;
+  border-color: #4caf50;
+  box-shadow: 0 0 10px rgba(76, 175, 80, 0.6);
+}
 
 /* Send button */
 .btn-send {
   align-self: flex-start;
-  background: linear-gradient(135deg, #111, #111);
+  background: linear-gradient(135deg, #4caf50, #388e3c);
   color: #fff;
   font-weight: 700;
   border: none;
@@ -663,6 +553,7 @@ body {
   user-select: none;
   animation: fadeInUp 0.6s ease forwards;
 }
+
 /* ======= Common Styles for Gradebook & Assignments Tables ======= */
 
 .table-container {
@@ -778,202 +669,14 @@ body {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
 }
 
-/* Status colors */
+.assignments-table tbody td.status.completed {
+  background-color: #4caf50;
+}
+
 .assignments-table tbody td.status.pending {
-  background-color: #111; /* Red */
+  background-color: #f44336;
 }
 
 .assignments-table tbody td.status.submitted {
-  background-color: #111; /* Green */
-}
-
-.assignments-table tbody td.status.graded {
-  background-color: #111; /* Blue */
-}
-
-/* Buttons styling */
-.btn-edit,
-.btn-delete {
-  background: transparent;
-  border: 2px solid transparent;
-  padding: 6px 12px;
-  border-radius: 8px;
-  font-weight: 600;
-  font-size: 14px;
-  cursor: pointer;
-  transition: background-color 0.25s ease, border-color 0.25s ease;
-  user-select: none;
-  margin-right: 6px;
-}
-
-.btn-edit {
-  color: #111;
-  border-color: #111;
-}
-
-.btn-edit:hover {
-  background-color: #111;
-  color: #e0f2f1;
-}
-
-.btn-delete {
-  color: #d32f2f;
-  border-color: #d32f2f;
-}
-
-.btn-delete:hover {
-  background-color: #d32f2f;
-  color: #fff;
-}
-
-/* Responsive table for mobile */
-@media (max-width: 768px) {
-  .table-container {
-    padding: 20px 15px;
-    margin: 20px 10px;
-  }
-
-  .gradebook-table thead,
-  .assignments-table thead {
-    display: none; /* Hide header on small screens */
-  }
-
-  .gradebook-table tbody tr,
-  .assignments-table tbody tr {
-    display: block;
-    margin-bottom: 20px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.07);
-    border-radius: 14px;
-    background: #fff;
-  }
-
-  .gradebook-table tbody td,
-  .assignments-table tbody td {
-    display: flex;
-    justify-content: space-between;
-    padding: 14px 18px;
-    border-bottom: 1px solid #eee;
-  }
-
-  .gradebook-table tbody td:last-child,
-  .assignments-table tbody td:last-child {
-    border-bottom: none;
-  }
-
-  .gradebook-table tbody td::before,
-  .assignments-table tbody td::before {
-    content: attr(data-label);
-    font-weight: 700;
-    color: #555;
-    flex-basis: 45%;
-    user-select: none;
-  }
-
-  .gradebook-table tbody td.grade,
-  .assignments-table tbody td.status {
-    text-align: right;
-    font-weight: 700;
-  }
-
-  .btn-edit,
-  .btn-delete {
-    margin-right: 0;
-    padding: 5px 10px;
-    font-size: 13px;
-  }
-}
-/* Attendence Summary Table */
-.attendance-summary {
-  margin-top: 30px;
-  width: 100%;
-  border-collapse: collapse;
-}
-.attendance-summary th,
-.attendance-summary td {
-  border: 1px solid #ddd;
-  padding: 8px 12px;
-  text-align: center;
-}
-.attendance-summary thead {
-  background-color: #e2f0e2;
-  font-weight: 700;
-  color: #111;
-}
-/* Animation */
-@keyframes fadeInUp {
-  0% {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* ======== Dark Mode ======== */
-body.dark-mode {
-  background: #1e1e2f !important;
-  color: #ddd !important;
-}
-
-body.dark-mode .main {
-  background-color: #2a2a3b;
-  color: #ddd;
-}
-
-body.dark-mode .sidebar,
-body.dark-mode .card,
-body.dark-mode .settings-dropdown,
-body.dark-mode .notification-dropdown {
-  background-color: #2a2a3b;
-  color: #ddd;
-}
-
-body.dark-mode .nav a {
-  color: #bbb;
-}
-
-body.dark-mode .nav a.active,
-body.dark-mode .nav a:hover {
-  background-color: #4caf50;
-  color: #fff;
-}
-
-body.dark-mode .profile .email,
-body.dark-mode .profile .name {
-  color: #eee;
-}
-
-body.dark-mode .performance-table thead {
-  background-color: #4caf50;
-}
-
-body.dark-mode .performance-table tbody tr:nth-child(even) {
-  background-color: #384048;
-}
-
-body.dark-mode .performance-table tbody tr:hover {
-  background-color: #3f534d;
-}
-
-body.dark-mode .btn-pay,
-body.dark-mode .btn-send {
-  background-color: #4caf50;
-  color: #fff;
-}
-
-body.dark-mode .btn-pay:hover,
-body.dark-mode .btn-send:hover {
-  background-color: #3a8e3a;
-}
-
-body.dark-mode .message.sent {
-  background-color: #2e4a2e;
-  border-color: #4caf50;
-}
-
-body.dark-mode .message.received {
-  background-color: #3c3f4a;
-  border-color: #666;
+  background-color: #2196f3;
 }

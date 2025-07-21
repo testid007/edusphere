@@ -23,8 +23,10 @@ $formData = [
     'dob' => '',
     'relationship' => '',
 ];
-
 $roles = ['Student', 'Teacher', 'Admin', 'Parent'];
+
+define('TEACHER_SECRET', 'teacher123');
+define('ADMIN_SECRET', 'admin123');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     foreach ($formData as $key => $value) {
@@ -32,6 +34,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $formData[$key] = trim(htmlspecialchars($_POST[$key]));
         }
     }
+
+    $secretCode = $_POST['secret_code'] ?? '';
 
     if ($formData['password'] !== $formData['confirmPassword']) {
         $error = "Passwords do not match";
@@ -47,6 +51,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = "Please enter Date of Birth for Student";
     } elseif ($formData['role'] === 'Parent' && (empty($_POST['student_id']) || empty($formData['relationship']))) {
         $error = "Please provide Student ID and relationship for Parent role";
+    } elseif ($formData['role'] === 'Teacher' && $secretCode !== TEACHER_SECRET) {
+        $error = "Invalid secret code for Teacher";
+    } elseif ($formData['role'] === 'Admin' && $secretCode !== ADMIN_SECRET) {
+        $error = "Invalid secret code for Admin";
     }
 
     if (!$error) {
@@ -56,23 +64,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($stmt->rowCount() > 0) {
                 $error = "Email already registered";
             } else {
-                // Commenting out OTP generation and email sending for now
                 /*
                 // Generate OTP
                 $otp = rand(100000, 999999);
                 $_SESSION['otp'] = $otp;
                 $_SESSION['otp_data'] = $formData;
-                $_SESSION['student_id'] = $_POST['student_id'] ?? null; // Only used for Parent
+                $_SESSION['student_id'] = $_POST['student_id'] ?? null; // For Parent
                 $_SESSION['password_hash'] = password_hash($formData['password'], PASSWORD_DEFAULT);
 
-                // Send email via PHPMailer
+                // Send OTP email
                 $mail = new PHPMailer(true);
                 try {
                     $mail->isSMTP();
                     $mail->Host = 'smtp.gmail.com';
                     $mail->SMTPAuth = true;
-                    $mail->Username = 'your_email@gmail.com'; // Replace with your Gmail
-                    $mail->Password = 'your_app_password';    // App Password from Google
+                    $mail->Username = 'your_email@gmail.com';
+                    $mail->Password = 'your_app_password';
                     $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
                     $mail->Port = 587;
 
@@ -81,7 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $mail->isHTML(true);
                     $mail->Subject = 'Your OTP for EduSphere Registration';
-                    $mail->Body    = "<p>Hello <strong>{$formData['firstName']} {$formData['lastName']}</strong>,<br>Your OTP is: <strong>{$otp}</strong></p>";
+                    $mail->Body = "<p>Hello <strong>{$formData['firstName']} {$formData['lastName']}</strong>,<br>Your OTP is: <strong>{$otp}</strong></p>";
 
                     $mail->send();
 
@@ -92,9 +99,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 */
 
-                // Instead directly insert user now (no OTP)
+                // Insert user directly (without OTP)
                 $passwordHash = password_hash($formData['password'], PASSWORD_DEFAULT);
-
                 $stmt = $conn->prepare("INSERT INTO users 
                     (first_name, last_name, email, password_hash, phone, role, gender) 
                     VALUES (?, ?, ?, ?, ?, ?, ?)");
@@ -105,7 +111,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $passwordHash,
                     $formData['phone'],
                     $formData['role'],
-                    $formData['gender']
+                    $formData['gender'],
                 ]);
 
                 $userId = $conn->lastInsertId();
@@ -128,16 +134,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stmt = $conn->prepare("INSERT INTO teachers (user_id, subject, department) VALUES (?, '', '')");
                     $stmt->execute([$userId]);
                 } elseif ($formData['role'] === 'Parent') {
-                    $studentId = (int)$_POST['student_id'];
-                    $stmtCheck = $conn->prepare("SELECT user_id FROM students WHERE user_id = ?");
-                    $stmtCheck->execute([$studentId]);
+                    $studentSerial  = (int)$_POST['student_id'];
+                    
+                    // $stmtCheck = $conn->prepare("SELECT user_id FROM students WHERE user_id = ?");
+                    $stmtCheck = $conn->prepare("SELECT user_id FROM students WHERE student_serial = ?");
+                    $stmtCheck->execute(params: [$studentSerial]);
 
                     if ($stmtCheck->rowCount() === 0) {
+                        
                         $error = "Student ID not found";
                         $conn->prepare("DELETE FROM users WHERE id = ?")->execute([$userId]);
                     } else {
+                        $studentUserId = $stmtCheck->fetchColumn();
+                        
                         $stmt = $conn->prepare("INSERT INTO parents (user_id, student_id, relationship) VALUES (?, ?, ?)");
-                        $stmt->execute([$userId, $studentId, $formData['relationship']]);
+                        
+                        $stmt->execute([$userId, $studentUserId, $formData['relationship']]);
+                        
                     }
                 } elseif ($formData['role'] === 'Admin') {
                     $stmt = $conn->prepare("INSERT INTO admins (user_id, role_description) VALUES (?, '')");
@@ -156,6 +169,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 ?>
+
+
 
 <!-- HTML PART -->
 <!DOCTYPE html>
@@ -204,6 +219,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
 
         <div id="password-strength-text" style="color: green; font-weight: bold;"></div>
+
+        <div class="form-row" id="secret-code-row" style="display: none;">
+        <input type="password" name="secret_code" placeholder="Enter Secret Code" />
+        </div>
 
         <div class="radio-row">
           <label><input type="radio" name="gender" value="Male" <?= $formData['gender'] === 'Male' ? 'checked' : '' ?> required /> Male</label>
