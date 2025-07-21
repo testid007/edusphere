@@ -111,7 +111,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $passwordHash,
                     $formData['phone'],
                     $formData['role'],
-                    $formData['gender']
+                    $formData['gender'],
                 ]);
 
                 $userId = $conn->lastInsertId();
@@ -134,16 +134,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stmt = $conn->prepare("INSERT INTO teachers (user_id, subject, department) VALUES (?, '', '')");
                     $stmt->execute([$userId]);
                 } elseif ($formData['role'] === 'Parent') {
-                    $studentId = (int)$_POST['student_id'];
-                    $stmtCheck = $conn->prepare("SELECT user_id FROM students WHERE user_id = ?");
-                    $stmtCheck->execute([$studentId]);
+                    $studentSerial  = (int)$_POST['student_id'];
+                    
+                    // $stmtCheck = $conn->prepare("SELECT user_id FROM students WHERE user_id = ?");
+                    $stmtCheck = $conn->prepare("SELECT user_id FROM students WHERE student_serial = ?");
+                    $stmtCheck->execute(params: [$studentSerial]);
 
                     if ($stmtCheck->rowCount() === 0) {
+                        
                         $error = "Student ID not found";
                         $conn->prepare("DELETE FROM users WHERE id = ?")->execute([$userId]);
                     } else {
+                        $studentUserId = $stmtCheck->fetchColumn();
+                        
                         $stmt = $conn->prepare("INSERT INTO parents (user_id, student_id, relationship) VALUES (?, ?, ?)");
-                        $stmt->execute([$userId, $studentId, $formData['relationship']]);
+                        
+                        $stmt->execute([$userId, $studentUserId, $formData['relationship']]);
+                        
                     }
                 } elseif ($formData['role'] === 'Admin') {
                     $stmt = $conn->prepare("INSERT INTO admins (user_id, role_description) VALUES (?, '')");
