@@ -6,7 +6,7 @@ body {
   justify-content: center;
   align-items: center;
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-  background: url("../img/bg.jpg") no-repeat center center fixed;
+  background: linear-gradient(to right, #50a8c8, #0f2b33);
   background-size: cover;
 }
 
@@ -15,9 +15,7 @@ body {
   width: 85%;
   max-width: 3000px;
   height: 70vh;
-
-  /* Glassmorphism effect */
-  background: rgba(255, 255, 255, 0.05); /* very transparent */
+  background: linear-gradient(to right, #50a8c8, #0f2b33);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   border-radius: 20px;
@@ -34,7 +32,6 @@ body {
   border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.07);
   box-shadow: 0 4px 15px rgba(255, 255, 255, 0.05);
-
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -90,7 +87,7 @@ body {
 }
 
 .login-btn {
-  background-color: #0044cc;
+  background: linear-gradient(to right, #50a8c8, #0f2b33);
   color: white;
   padding: 10px 30px;
   border: none;
@@ -101,19 +98,17 @@ body {
 }
 
 .login-btn:hover {
-  background-color: #0033aa;
+  background: linear-gradient(to right, #3e90ac, #0c1f25);
 }
 
 .right-section {
   width: 45%;
-
   background: rgba(255, 255, 255, 0.03);
   backdrop-filter: blur(5px);
   -webkit-backdrop-filter: blur(5px);
   border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.07);
   box-shadow: 0 4px 15px rgba(255, 255, 255, 0.05);
-
   padding: 3rem;
   display: flex;
   flex-direction: column;
@@ -134,9 +129,9 @@ body {
 
 .role-toggle button {
   padding: 8px 20px;
-  border: 2px solid #0044cc;
+  border: 2px solid #111;
   background-color: transparent;
-  color: #0044cc;
+  color: #111;
   font-weight: bold;
   border-radius: 25px;
   cursor: pointer;
@@ -148,7 +143,7 @@ body {
 }
 
 .role-toggle .active {
-  background-color: #0044cc;
+  background: linear-gradient(to right, #50a8c8, #0f2b33);
   color: white;
 }
 
@@ -190,18 +185,18 @@ select {
 .register-btn {
   width: 100%;
   padding: 12px;
-  background-color: #0864ee;
+  background-color: #111;
   color: white;
   border: none;
   border-radius: 25px;
   font-weight: bold;
   font-size: 1rem;
   cursor: pointer;
-  transition: 0.3s;
+  transition: 0.3s ease;
 }
 
 .register-btn:hover {
-  background-color: #004ec2;
+  background-color: #222;
 }
 
 .error {

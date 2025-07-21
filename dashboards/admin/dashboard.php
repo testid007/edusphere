@@ -6,18 +6,19 @@ $admin_name = $_SESSION['admin_name'] ?? 'Admin';
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Admin Dashboard</title>
-  <link rel="stylesheet" href="../../assets/css/dashboard.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="../../assets/css/dashboard.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
   <div class="container">
+    <!-- Sidebar -->
     <aside class="sidebar">
       <div class="logo">
-        <img src="../../assets/img/logo.png" alt="Logo">
+        <img src="../../assets/img/logo.png" alt="Logo" />
       </div>
       <nav class="nav">
         <a href="#" class="active" data-page="dashboard-content"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
@@ -29,6 +30,8 @@ $admin_name = $_SESSION['admin_name'] ?? 'Admin';
         <a href="#" data-page="schedule-view"><i class="fas fa-eye"></i> Schedule View</a>
         <a href="../../auth/logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a>
       </nav>
+
+      <!-- Admin Profile -->
       <div class="profile">
         <img src="../../assets/img/user.jpg" alt="Admin">
         <div class="name"><?php echo htmlspecialchars($admin_name); ?></div>
@@ -37,7 +40,8 @@ $admin_name = $_SESSION['admin_name'] ?? 'Admin';
             <i class="fas fa-cog" id="settingsToggle"></i>
             <div class="settings-dropdown" id="settingsMenu">
               <label><input type="checkbox" id="darkModeToggle"> Dark Mode</label>
-              <label>Language:
+              <label>
+                Language:
                 <select id="languageSelect">
                   <option value="en">English</option>
                   <option value="np">Nepali</option>
@@ -49,6 +53,7 @@ $admin_name = $_SESSION['admin_name'] ?? 'Admin';
       </div>
     </aside>
 
+    <!-- Main Area -->
     <main class="main">
       <header class="header">
         <div>
@@ -70,52 +75,69 @@ $admin_name = $_SESSION['admin_name'] ?? 'Admin';
       </header>
 
       <section class="content" id="dashboardContent">
-        <!-- Dynamic content loaded here -->
+        <!-- Dynamic content loads here -->
+        <p>Loading...</p>
       </section>
     </main>
   </div>
 
+  <!-- JavaScript -->
   <script>
-    const links = document.querySelectorAll('.nav a[data-page]');
-    const mainContent = document.getElementById('dashboardContent');
+    const navLinks = document.querySelectorAll('.nav-link');
+    const dashboardContent = document.getElementById('dashboardContent');
 
     function loadPage(page) {
       fetch(`../../dashboards/admin/${page}.php`)
-        .then(res => res.ok ? res.text() : Promise.reject("Failed to load " + page))
+        .then(response => {
+          if (!response.ok) throw new Error(`Could not load ${page}`);
+          return response.text();
+        })
         .then(html => {
-          mainContent.innerHTML = html;
+          dashboardContent.innerHTML = html;
           if (page === 'reports') renderCharts();
         })
-        .catch(err => {
-          mainContent.innerHTML = `<p class='error'>Error loading content: ${err.message}</p>`;
+        .catch(error => {
+          dashboardContent.innerHTML = `<p class="error">Error: ${error.message}</p>`;
         });
     }
 
-    links.forEach(link => {
+    navLinks.forEach(link => {
       link.addEventListener('click', e => {
         e.preventDefault();
-        links.forEach(l => l.classList.remove('active'));
+
+        // Remove active from all
+        navLinks.forEach(l => l.classList.remove('active'));
+
+        // Add active to clicked
         link.classList.add('active');
-        loadPage(link.dataset.page);
+
+        const page = link.getAttribute('data-page');
+        loadPage(page);
       });
     });
 
-    window.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', () => {
       loadPage('dashboard-content');
-      if (localStorage.getItem('darkMode') === 'enabled') {
+
+      // Restore Dark Mode if set
+      const isDark = localStorage.getItem('darkMode') === 'enabled';
+      if (isDark) {
         document.body.classList.add('dark-mode');
         document.getElementById('darkModeToggle').checked = true;
       }
     });
 
-    const bell = document.getElementById('notificationBell');
-    const dropdown = document.getElementById('notificationDropdown');
-    bell.addEventListener('click', () => dropdown.classList.toggle('show'));
+    // Notification toggle
+    document.getElementById('notificationBell').addEventListener('click', () => {
+      document.getElementById('notificationDropdown').classList.toggle('show');
+    });
 
-    const settingsToggle = document.getElementById('settingsToggle');
-    const settingsMenu = document.getElementById('settingsMenu');
-    settingsToggle.addEventListener('click', () => settingsMenu.classList.toggle('show'));
+    // Settings dropdown
+    document.getElementById('settingsToggle').addEventListener('click', () => {
+      document.getElementById('settingsMenu').classList.toggle('show');
+    });
 
+    // Dark mode toggle
     const darkToggle = document.getElementById('darkModeToggle');
     darkToggle.addEventListener('change', () => {
       if (darkToggle.checked) {
@@ -127,6 +149,7 @@ $admin_name = $_SESSION['admin_name'] ?? 'Admin';
       }
     });
 
+    // Render charts if available
     function renderCharts() {
       const barCtx = document.getElementById('barChart');
       if (barCtx) {

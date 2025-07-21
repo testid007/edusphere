@@ -1,4 +1,7 @@
 <?php
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
 session_start();
 $parent_name = $_SESSION['parent_name'] ?? 'Parent';
 $parent_email = $_SESSION['parent_email'] ?? 'parent@example.com';
@@ -25,13 +28,13 @@ $parent_email = $_SESSION['parent_email'] ?? 'parent@example.com';
         <a href="#" data-page="child-performance"><i class="fas fa-chart-line"></i> Child Performance</a>
         <a href="#" data-page="fee-status"><i class="fas fa-money-bill"></i> Fee Status</a>
         <a href="#" data-page="communication"><i class="fas fa-envelope"></i> Communicate with Teachers</a>
+        <a href="/edusphere/auth/logout.php" class="logout-icon"><i class="fas fa-sign-out-alt"></i> Logout</a>
       </nav>
 
       <div class="profile">
         <img src="../../assets/img/user.jpg" alt="Parent" />
         <div class="name"><?= htmlspecialchars($parent_name) ?></div>
         <div class="email"><?= htmlspecialchars($parent_email) ?></div>
-
         <div class="profile-actions">
           <div class="dropdown">
             <i class="fas fa-cog" id="settingsToggle"></i>
@@ -48,7 +51,6 @@ $parent_email = $_SESSION['parent_email'] ?? 'parent@example.com';
               </label>
             </div>
           </div>
-          <a href="../auth/logout.php" class="logout-icon"><i class="fas fa-sign-out-alt"></i></a>
         </div>
       </div>
     </aside>
@@ -94,12 +96,15 @@ $parent_email = $_SESSION['parent_email'] ?? 'parent@example.com';
     }
 
     links.forEach(link => {
-      link.addEventListener('click', e => {
-        e.preventDefault();
-        links.forEach(l => l.classList.remove('active'));
-        link.classList.add('active');
-        loadPage(link.dataset.page);
-      });
+      // Only AJAX-load if the link has data-page (not for logout)
+      if (link.hasAttribute('data-page')) {
+        link.addEventListener('click', e => {
+          e.preventDefault();
+          links.forEach(l => l.classList.remove('active'));
+          link.classList.add('active');
+          loadPage(link.dataset.page);
+        });
+      }
     });
 
     window.addEventListener('DOMContentLoaded', () => {

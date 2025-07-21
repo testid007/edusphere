@@ -250,35 +250,50 @@ body {
 /* ======== Cards ======== */
 .cards {
   display: flex;
-  gap: 20px;
   flex-wrap: wrap;
+  gap: 24px;
+  margin: 32px 0 0 0;
+  justify-content: flex-start;
 }
 
 .card {
-  background-color: #fff;
-  border-radius: 16px;
-  padding: 20px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.05);
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(44, 62, 80, 0.07);
+  padding: 20px 28px;
+  min-width: 220px;
+  max-width: 260px;
   flex: 1 1 220px;
-  cursor: default;
-  transition: transform 0.3s ease;
+  display: flex;
+  align-items: flex-start;
+  transition: box-shadow 0.2s;
 }
 
 .card:hover {
-  transform: translateY(-4px);
+  box-shadow: 0 4px 16px rgba(44, 62, 80, 0.13);
 }
 
 .card h3 {
-  font-size: 16px;
-  font-weight: 800;
-  margin-bottom: 10px;
-  color: #333;
+  margin: 0 0 10px 0;
+  font-size: 1.1rem;
+  color: #2c3e50;
 }
 
 .card p {
-  font-size: 22px;
-  font-weight: 400;
-  color: #111;
+  margin: 0 0 6px 0;
+  color: #444;
+  font-size: 0.98rem;
+}
+
+@media (max-width: 900px) {
+  .cards {
+    flex-direction: column;
+    gap: 16px;
+  }
+  .card {
+    max-width: 100%;
+    min-width: 0;
+  }
 }
 
 /* ======== Tables ======== */
