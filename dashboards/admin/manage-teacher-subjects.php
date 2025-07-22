@@ -1,4 +1,7 @@
 <?php
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
 require_once __DIR__ . '/../../functions/ScheduleManager.php';
 $scheduleManager = new ScheduleManager();
 
@@ -11,11 +14,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $teacherId = $_POST['teacher_id'] ?? null;
     $subjectIds = $_POST['subject_ids'] ?? [];
 
+    // Log the teacher ID and subject IDs for debugging
+    error_log("Teacher: " . print_r($teacherId, true));
+    error_log("Subjects: " . print_r($subjectIds, true));
+
     // Basic validation
     if ($teacherId && !empty($subjectIds)) {
         // Save the selected subjects
         if ($scheduleManager->assignSubjectsToTeacher($teacherId, $subjectIds)) {
-            $success = "✅ Subjects assigned successfully!";
+            // On success, show popup and redirect to dashboard.php
+            echo '<script>alert("Subjects assigned successfully!"); window.location.href = "dashboard.php";</script>';
+            exit;
         } else {
             $error = "❌ Failed to assign subjects.";
         }
@@ -51,7 +60,8 @@ $subjects = $scheduleManager->getAllSubjects();
         <?php endif; ?>
 
         <!-- Subject Assignment Form -->
-        <form method="POST" class="card p-4">
+        <!-- <form method="POST" class="card p-4"> -->
+        <form method="POST" action="<?= htmlspecialchars($_SERVER['PHP_SELF']) ?>" class="card p-4">
             <!-- Teacher Dropdown -->
             <div class="mb-3">
                 <label for="teacher_id">Select Teacher:</label>

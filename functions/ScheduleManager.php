@@ -12,22 +12,17 @@ class ScheduleManager {
     /**
      * ✅ Fetch schedule entries for a class/grade
      */
-    public function getClassSchedule($grade) {
+    public function getClassSchedule($classId) {
         $stmt = $this->conn->prepare("
-            SELECT se.id, se.day, ts.period_name, ts.start_time, ts.end_time,
-                   IFNULL(ss.name, se.special_name) AS subject,
-                   CONCAT(u.first_name, ' ', u.last_name) AS teacher,
-                   se.user_id AS teacher_id,
-                   se.is_special
+            SELECT se.class, se.day, ts.period_name, ts.start_time, ts.end_time, ss.name AS subject, CONCAT(u.first_name, ' ', u.last_name) AS teacher
             FROM schedule_entries se
             JOIN schedule_time_slots ts ON se.time_slot_id = ts.id
             LEFT JOIN schedule_subjects ss ON se.subject_id = ss.id
             LEFT JOIN users u ON se.user_id = u.id
             WHERE se.class = ?
-            ORDER BY FIELD(se.day, 'Sunday','Monday','Tuesday','Wednesday','Thursday','Friday'),
-                     ts.start_time
+            ORDER BY FIELD(se.day, 'Sunday','Monday','Tuesday','Wednesday','Thursday','Friday'), ts.start_time
         ");
-        $stmt->execute([$grade]);
+        $stmt->execute([$classId]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -147,25 +142,67 @@ class ScheduleManager {
      * First deletes old assignments and saves the new ones
      */
     public function assignSubjectsToTeacher($teacherId, $subjectIds) {
-        // Validate input
-        if (!$teacherId || !is_array($subjectIds)) {
+        $conn = $this->conn; // Use the existing PDO connection
+
+        // Start transaction
+        $conn->beginTransaction();
+
+        try {
+            // Remove old assignments for this teacher
+            $stmt = $conn->prepare("DELETE FROM schedule_teacher_subjects WHERE user_id = ?");
+            $stmt->execute([$teacherId]);
+
+            // Insert new assignments
+            $stmt = $conn->prepare("INSERT INTO schedule_teacher_subjects (user_id, subject_id) VALUES (?, ?)");
+            foreach ($subjectIds as $subjectId) {
+                print( $stmt->execute([$teacherId, $subjectId]) ? "Success++++" : "Failed******" );
+            }
+
+            $conn->commit();
+            return true;
+        } catch (Exception $e) {
+            $conn->rollBack();
+            error_log("AssignSubjectsToTeacher error: " . $e->getMessage());
             return false;
         }
+    }
 
-        // Delete old subject assignments
-        $stmt = $this->conn->prepare("DELETE FROM schedule_teacher_subjects WHERE user_id = ?");
-        $stmt->execute([$teacherId]);
+    /**
+     * ✅ Get subjects for a specific grade
+     */
+    public function getSubjectsForGrade($grade) {
+        // Get subjects for the grade
+        $stmt = $this->conn->prepare("SELECT id, name FROM schedule_subjects WHERE 
+            (CAST(SUBSTRING_INDEX(grade_range, '-', 1) AS UNSIGNED) <= ? AND 
+             CAST(SUBSTRING_INDEX(grade_range, '-', -1) AS UNSIGNED) >= ?)
+            ORDER BY name");
+        $stmt->execute([$grade, $grade]);
+        $subjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // Insert new subject assignments
-        $stmt = $this->conn->prepare("INSERT INTO schedule_teacher_subjects (user_id, subject_id) VALUES (?, ?)");
-
-        foreach ($subjectIds as $subjectId) {
-            if (!empty($subjectId)) {
-                $stmt->execute([$teacherId, $subjectId]);
-            }
+        // Attach teachers for each subject
+        foreach ($subjects as &$subject) {
+            $stmt2 = $this->conn->prepare("SELECT u.id, CONCAT(u.first_name, ' ', u.last_name) AS name FROM schedule_teacher_subjects sts JOIN users u ON sts.user_id = u.id WHERE sts.subject_id = ?");
+            $stmt2->execute([$subject['id']]);
+            $subject['teachers'] = $stmt2->fetchAll(PDO::FETCH_ASSOC);
         }
+        return $subjects;
+    }
 
-        return true;
+    /**
+     * ✅ Get available time slots for a specific grade and day
+     */
+    public function getAvailableTimeSlots($grade, $day) {
+        // Get all slots
+        $all = $this->conn->query("SELECT id, period_name, start_time, end_time FROM schedule_time_slots")->fetchAll(PDO::FETCH_ASSOC);
+        // Get booked slots for this grade/day
+        $stmt = $this->conn->prepare("SELECT time_slot_id FROM schedule_entries WHERE class = ? AND day = ?");
+        $stmt->execute([$grade, $day]);
+        $booked = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        // Mark booked
+        foreach ($all as &$slot) {
+            $slot['booked'] = in_array($slot['id'], $booked);
+        }
+        return $all;
     }
 }
 ?>

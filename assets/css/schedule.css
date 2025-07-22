@@ -1,0 +1,116 @@
+/* Schedule Management Page Styles */
+
+body {
+  background: #f6f8fa;
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+.main-content {
+  padding: 30px 0;
+}
+
+h2 {
+  color: #2c3e50;
+  font-weight: 700;
+  margin-bottom: 24px;
+}
+
+.card {
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(44, 62, 80, 0.08);
+  border: none;
+  margin-bottom: 24px;
+  background: #fff;
+}
+
+.card-header {
+  background: #f0f4f8;
+  font-weight: 600;
+  font-size: 1.1rem;
+  border-bottom: 1px solid #e0e6ed;
+  border-radius: 12px 12px 0 0;
+}
+
+.card-body {
+  padding: 24px;
+}
+
+.form-select,
+.form-control {
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  font-size: 1rem;
+  padding: 8px 12px;
+  background: #f9fafb;
+  transition: border-color 0.2s;
+}
+
+.form-select:focus,
+.form-control:focus {
+  border-color: #2563eb;
+  outline: none;
+  background: #fff;
+}
+
+label {
+  font-weight: 500;
+  color: #374151;
+  margin-bottom: 4px;
+}
+
+.btn-primary {
+  background: linear-gradient(90deg, #2563eb 0%, #1e40af 100%);
+  border: none;
+  color: #fff;
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 8px 24px;
+  transition: background 0.2s;
+}
+
+.btn-primary:hover,
+.btn-primary:focus {
+  background: linear-gradient(90deg, #1e40af 0%, #2563eb 100%);
+  color: #fff;
+}
+
+.alert {
+  border-radius: 6px;
+  padding: 10px 16px;
+  margin-top: 10px;
+  font-size: 1rem;
+}
+
+.alert-success {
+  background: #e6f9ed;
+  color: #1b5e20;
+  border-left: 5px solid #34d399;
+}
+
+.alert-danger {
+  background: #fbeaea;
+  color: #b91c1c;
+  border-left: 5px solid #f87171;
+}
+
+.alert-warning {
+  background: #fffbe6;
+  color: #b45309;
+  border-left: 5px solid #fbbf24;
+}
+
+#special-name-group {
+  transition: all 0.2s;
+}
+
+@media (max-width: 768px) {
+  .main-content {
+    padding: 10px 0;
+  }
+  .card-body {
+    padding: 12px;
+  }
+  .row.mb-3 > div {
+    margin-bottom: 12px;
+  }
+}
