@@ -11,6 +11,28 @@ unset($_SESSION['login_error']); // Clear the error after retrieving it
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>EduSphere | Login</title>
   <link rel="stylesheet" href="../assets/css/login.css" />
+  <style>
+    .password-container {
+      position: relative;
+    }
+    
+    .toggle-password {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #666;
+      font-size: 14px;
+      padding: 0;
+    }
+    
+    .toggle-password:hover {
+      color: #333;
+    }
+  </style>
 </head>
 <body>
   <div class="login-container">
@@ -33,7 +55,12 @@ unset($_SESSION['login_error']); // Clear the error after retrieving it
 
         <div class="form-group">
           <label>Password</label>
-          <input type="password" name="password" required />
+          <div class="password-container">
+            <input type="password" name="password" id="password" required />
+            <button type="button" class="toggle-password" onclick="togglePassword()">
+              <span id="toggle-text">Show</span>
+            </button>
+          </div>
         </div>
 
         <div class="form-group">
@@ -54,5 +81,20 @@ unset($_SESSION['login_error']); // Clear the error after retrieving it
       </p>
     </div>
   </div>
+
+  <script>
+    function togglePassword() {
+      const passwordInput = document.getElementById('password');
+      const toggleText = document.getElementById('toggle-text');
+      
+      if (passwordInput.type === 'password') {
+        passwordInput.type = 'text';
+        toggleText.textContent = 'Hide';
+      } else {
+        passwordInput.type = 'password';
+        toggleText.textContent = 'Show';
+      }
+    }
+  </script>
 </body>
 </html>

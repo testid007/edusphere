@@ -13,6 +13,7 @@ body {
   color: #2c2c2c;
   display: flex;
   height: 100vh;
+  width: 100%;
   overflow: hidden;
   transition: background 0.3s ease, color 0.3s ease;
 }
@@ -322,10 +323,6 @@ body {
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(76,175,80,0.10);
   padding: 20px 24px;
-  min-width: 200px;
-  max-width: 240px;
-  flex: 1 1 200px;
-  display: flex;
   align-items: flex-start;
   border: 2px solid #4caf50;
   transition: box-shadow 0.2s, border-color 0.2s;
@@ -459,7 +456,7 @@ body {
   }
 }
 
-/* ======== Fee Status ======== */
+/* ======== Fee Status ======== 
 body {
   background: #f5f7fa !important;
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif !important;
@@ -471,7 +468,6 @@ body {
   align-items: center !important;
   color: #333 !important;
 }
-
 /* Main container styling */
 .fee-status-container {
   background: #fff;
@@ -1174,3 +1170,49 @@ body.dark-mode .message.received {
   background-color: #3c3f4a;
   border-color: #666;
 }
+/* ======== Reports page overrides ======== */
+
+.card.reports-card {
+  max-width: none;          /* remove 240px limit */
+  width: 100%;
+  flex: 0 0 auto;
+  display: block;           /* not the small-card flex layout */
+  padding: 24px 28px;
+  align-items: stretch;
+}
+
+/* Row containing both charts */
+.reports-chart-row {
+  display: flex;
+  gap: 30px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+/* Each chart column */
+.reports-chart {
+  flex: 1 1 45%;
+  min-width: 260px;
+  min-height: 260px;
+}
+
+/* Give canvases a fixed height so Chart.js has proper space */
+.reports-chart canvas {
+  width: 100% !important;
+  height: 230px !important;
+}
+
+/* Summary text below charts */
+.reports-summary {
+  margin-top: 24px;
+  font-size: 0.95rem;
+}
+
+.reports-summary h4 {
+  margin: 0 0 6px;
+  font-weight: 700;
+}
+.reports-summary p {
+  margin: 2px 0;
+}
+

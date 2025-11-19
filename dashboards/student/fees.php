@@ -1,34 +1,44 @@
 <?php
 session_start();
+
+if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'student') {
+    header('Location: ../../auth/login.php');
+    exit;
+}
+
 require_once '../../includes/db.php';
 
-// Use session values if set, otherwise fallback (for temporary debug or guest view)
-$student_id = $_SESSION['student_id'] ?? null;
-$student_name = $_SESSION['student_name'] ?? 'Guest Student';
-$class = $_SESSION['class'] ?? 'Grade 10';
+// Canonical identity
+$student_id   = (int)($_SESSION['user_id'] ?? ($_SESSION['student_id'] ?? 0));
+$student_name = $_SESSION['student_name'] ?? 'Student';
+$student_email= $_SESSION['student_email'] ?? ($_SESSION['student_email'] ?? 'guest@example.com');
+$class        = $_SESSION['class'] ?? 'Grade 10';
 
 // Prepare receipt no and date
-if ($student_id) {
-    $receipt_no = '#FEE' . date('Y') . str_pad($student_id, 4, '0', STR_PAD_LEFT);
-} else {
-    $receipt_no = '#FEE' . date('Y') . '0000';
-}
-$payment_date = date('F j, Y');
+$receipt_no    = '#FEE' . date('Y') . str_pad($student_id ?: 0, 4, '0', STR_PAD_LEFT);
+$payment_date  = date('F j, Y');
 
 $fee_details = [];
-$total_paid = 0.00;
+$total_paid  = 0.00;
 
 if ($student_id) {
     try {
-        $stmt = $conn->prepare("SELECT description, amount FROM fees WHERE student_id = :student_id AND class_name = :class_name");
-        $stmt->execute([
-            ':student_id' => $student_id,
-            ':class_name' => $class
-        ]);
+        $sql = "SELECT description, amount 
+                FROM fees 
+                WHERE student_id = :student_id";
+        $params = [':student_id' => $student_id];
+
+        if ($class) {
+            $sql .= " AND class_name = :class_name";
+            $params[':class_name'] = $class;
+        }
+
+        $stmt = $conn->prepare($sql);
+        $stmt->execute($params);
         
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
             $fee_details[] = $row;
-            $total_paid += $row['amount'];
+            $total_paid   += (float)$row['amount'];
         }
     } catch (PDOException $e) {
         die("Error fetching fee data: " . $e->getMessage());
@@ -37,7 +47,6 @@ if ($student_id) {
 
 $payment_status = $total_paid > 0 ? 'Paid' : 'Pending';
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -60,27 +69,30 @@ $payment_status = $total_paid > 0 ? 'Paid' : 'Pending';
         <a href="assignments.php"><i class="fas fa-book"></i> My Assignments</a>
         <a href="results.php"><i class="fas fa-graduation-cap"></i> My Results</a>
         <a href="fees.php" class="active"><i class="fas fa-file-invoice-dollar"></i> Fee Details</a>
+        <a href="events.php"><i class="fas fa-calendar-alt"></i> Events</a>
         <a href="/edusphere/auth/logout.php" class="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
       </nav>
 
       <div class="profile">
         <img src="../../assets/img/user.jpg" alt="Student" />
         <div class="name"><?= htmlspecialchars($student_name) ?></div>
-        <div class="email"><?= htmlspecialchars($_SESSION['student_email'] ?? 'guest@example.com') ?></div>
+        <div class="email"><?= htmlspecialchars($student_email) ?></div>
       </div>
     </aside>
 
     <!-- Main Content -->
     <main class="main">
       <header class="header">
-        <h2>Fee Details</h2>
-        <p>Welcome, <?= htmlspecialchars($student_name) ?>!</p>
+        <div>
+          <h2>Fee Details</h2>
+          <p>Welcome, <?= htmlspecialchars($student_name) ?>!</p>
+        </div>
       </header>
 
       <section class="fee-status-container">
         <div class="fee-status-header">
           <h2>Fee Receipt</h2>
-          <p>School Name or Logo Here</p>
+          <p>Your School Name Here</p>
         </div>
 
         <div class="student-info">
@@ -114,7 +126,7 @@ $payment_status = $total_paid > 0 ? 'Paid' : 'Pending';
               <?php foreach ($fee_details as $fee): ?>
                 <tr>
                   <td><?= htmlspecialchars($fee['description']) ?></td>
-                  <td>Rs.<?= number_format($fee['amount'], 2) ?></td>
+                  <td>Rs. <?= number_format($fee['amount'], 2) ?></td>
                 </tr>
               <?php endforeach; ?>
               <tr>
@@ -132,7 +144,9 @@ $payment_status = $total_paid > 0 ? 'Paid' : 'Pending';
         </div>
 
         <div class="fee-status-footer">
-          Thank you for your payment!
+          <?= $payment_status === 'Paid'
+                    ? 'Thank you for your payment!'
+                    : 'No payment recorded yet. Please contact the account section.' ?>
         </div>
       </section>
     </main>

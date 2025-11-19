@@ -1,168 +1,319 @@
+<?php
+session_start();
+require_once '../../includes/db.php';
+
+// ---------- Access control ----------
+if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'admin') {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'message' => 'Unauthorized.']);
+        exit;
+    }
+    echo '<p>You are not authorized to view this page.</p>';
+    exit;
+}
+
+$adminId = (int)$_SESSION['user_id'];
+
+// ---------- CSRF token ----------
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+$csrf = $_SESSION['csrf_token'];
+
+// ---------- Handle AJAX POST (delete user) ----------
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    header('Content-Type: application/json');
+
+    $action = $_POST['action'] ?? '';
+    if ($action !== 'delete') {
+        echo json_encode(['success' => false, 'message' => 'Unknown action.']);
+        exit;
+    }
+
+    if (empty($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
+        echo json_encode(['success' => false, 'message' => 'Invalid CSRF token.']);
+        exit;
+    }
+
+    $userId = isset($_POST['user_id']) ? (int)$_POST['user_id'] : 0;
+    if ($userId <= 0) {
+        echo json_encode(['success' => false, 'message' => 'Invalid user id.']);
+        exit;
+    }
+
+    // Don't let admin delete self
+    if ($userId === $adminId) {
+        echo json_encode(['success' => false, 'message' => 'You cannot delete your own account.']);
+        exit;
+    }
+
+    try {
+        // Check role of the user to be deleted
+        $stmt = $conn->prepare("SELECT role FROM users WHERE id = ?");
+        $stmt->execute([$userId]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$user) {
+            echo json_encode(['success' => false, 'message' => 'User not found.']);
+            exit;
+        }
+
+        $roleToDelete = strtolower($user['role']);
+
+        // If deleting an admin, make sure there is more than one admin
+        if ($roleToDelete === 'admin') {
+            $stmt = $conn->prepare("SELECT COUNT(*) FROM users WHERE role = 'admin'");
+            $stmt->execute();
+            $adminCount = (int)$stmt->fetchColumn();
+
+            if ($adminCount <= 1) {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'You cannot delete the last admin account.'
+                ]);
+                exit;
+            }
+        }
+
+        // Do the delete
+        $stmt = $conn->prepare("DELETE FROM users WHERE id = ?");
+        $stmt->execute([$userId]);
+
+        echo json_encode(['success' => true, 'message' => 'User deleted successfully.']);
+    } catch (Exception $ex) {
+        echo json_encode(['success' => false, 'message' => 'Error: ' . $ex->getMessage()]);
+    }
+    exit;
+}
+
+// ---------- GET: fetch all users for table ----------
+try {
+    $stmt = $conn->query("
+        SELECT id, first_name, last_name, email, phone, role, gender
+        FROM users
+        ORDER BY id DESC
+    ");
+    $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (Exception $ex) {
+    $users = [];
+    $loadError = $ex->getMessage();
+}
+
+// small helper
+function e($v) { return htmlspecialchars($v ?? '', ENT_QUOTES); }
+?>
 
 <section class="section manage-users">
-  <h3 style="margin-bottom: 20px;">Manage Users</h3>
-  <div style="overflow-x: auto;">
-    <table style="width: 100%; border-collapse: collapse;">
-      <thead style="background-color: #111; color: white;">
-        <tr>
-          <th style="padding: 12px;">ID</th>
-          <th style="padding: 12px;">Name</th>
-          <th style="padding: 12px;">Email</th>
-          <th style="padding: 12px;">Role</th>
-          <th style="padding: 12px;">Status</th>
-          <th style="padding: 12px;">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr style="background-color: #fff; border-bottom: 1px solid #eee;">
-          <td style="padding: 12px;">1001</td>
-          <td style="padding: 12px;">Aayush Shrestha</td>
-          <td style="padding: 12px;">aayush@school.com</td>
-          <td style="padding: 12px;">Student</td>
-          <td style="padding: 12px;">Active</td>
-          <td style="padding: 12px;">
-            <form method="POST" action="">
-              <input type="hidden" name="delete_user_id" value="1001">
-              <button type="submit">Delete</button>
-            </form>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+  <h3 style="margin-bottom: 16px;">Manage Users</h3>
+  <p style="margin-bottom: 18px; color:#555; font-size:0.95rem;">
+    View all registered users and remove accounts when necessary.
+  </p>
+
+  <div id="manageUsersAlert" style="display:none; margin-bottom:12px;"></div>
+
+  <div class="card" style="width:100%; max-width:100%; flex:1 1 auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <h4 style="margin:0; font-size:1rem; color:#111;">All Registered Users</h4>
+      <span style="font-size:0.85rem; color:#666;">
+        Total: <?php echo count($users); ?>
+      </span>
+    </div>
+
+    <div style="overflow-x:auto;">
+      <table class="manage-users-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Full Name</th>
+            <th>Email</th>
+            <th>Phone</th>
+            <th>Role</th>
+            <th>Gender</th>
+            <th style="text-align:center;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php if (!empty($users)): ?>
+            <?php foreach ($users as $u): ?>
+              <tr data-user-id="<?php echo (int)$u['id']; ?>">
+                <td><?php echo (int)$u['id']; ?></td>
+                <td><?php echo e($u['first_name'] . ' ' . $u['last_name']); ?></td>
+                <td><?php echo e($u['email']); ?></td>
+                <td><?php echo e($u['phone']); ?></td>
+                <td>
+                  <span class="role-badge role-<?php echo strtolower(e($u['role'])); ?>">
+                    <?php echo e(ucfirst($u['role'])); ?>
+                  </span>
+                </td>
+                <td><?php echo e($u['gender']); ?></td>
+                <td style="text-align:center;">
+                  <button
+                    type="button"
+                    class="btn-delete-user"
+                    data-user-id="<?php echo (int)$u['id']; ?>"
+                  >
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            <?php endforeach; ?>
+          <?php else: ?>
+            <tr>
+              <td colspan="7" style="text-align:center; padding:14px; color:#777;">
+                No users found.
+              </td>
+            </tr>
+          <?php endif; ?>
+        </tbody>
+      </table>
+    </div>
   </div>
 </section>
 
-<?php
-session_start();
-require_once '../../includes/db.php'; // Adjust path if necessary
+<style>
+  /* Table styled to match EduSphere green theme */
+  .manage-users-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95rem;
+  }
+  .manage-users-table thead {
+    background: #111;
+    color: #fff;
+  }
+  .manage-users-table th,
+  .manage-users-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid #e5e7eb;
+    text-align: left;
+  }
+  .manage-users-table tbody tr:nth-child(even) {
+    background: #fafafa;
+  }
+  .manage-users-table tbody tr:hover {
+    background: #f6fef8;
+  }
 
-// Handle deletion
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_user_id'])) {
-    $deleteUserId = (int)$_POST['delete_user_id'];
+  .btn-delete-user {
+    padding: 6px 12px;
+    font-size: 0.83rem;
+    border-radius: 999px;
+    border: none;
+    cursor: pointer;
+    background: #ef4444;
+    color: #fff;
+    box-shadow: 0 2px 6px rgba(239, 68, 68, 0.3);
+    transition: background 0.2s, box-shadow 0.2s, transform 0.1s;
+  }
+  .btn-delete-user:hover {
+    background: #dc2626;
+    box-shadow: 0 3px 10px rgba(220, 38, 38, 0.35);
+    transform: translateY(-1px);
+  }
 
-    $stmt = $conn->prepare("DELETE FROM users WHERE id = ?");
-    $stmt->execute([$deleteUserId]);
-}
+  .role-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    background: #e5f9ea;
+    color: #166534;
+  }
+  .role-badge.role-teacher {
+    background: #e0f2fe;
+    color: #1d4ed8;
+  }
+  .role-badge.role-parent {
+    background: #fef3c7;
+    color: #92400e;
+  }
+  .role-badge.role-admin {
+    background: #fee2e2;
+    color: #b91c1c;
+  }
 
-// Fetch all users
-$stmt = $conn->prepare("SELECT * FROM users");
-$stmt->execute();
-$users = $stmt->fetchAll(PDO::FETCH_ASSOC);
-?>
+  .manage-users-alert-success {
+    background: #ecfdf3;
+    border: 1px solid #bbf7d0;
+    color: #166534;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+  }
+  .manage-users-alert-error {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: #b91c1c;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+  }
 
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Manage Users</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background: #f8f9fa;
-            margin: 0;
-            padding: 0;
+  @media (max-width: 768px) {
+    .manage-users-table th,
+    .manage-users-table td {
+      padding: 8px 10px;
+      font-size: 0.85rem;
+    }
+  }
+</style>
+
+<script>
+  (function() {
+    const csrfToken = '<?php echo $csrf; ?>';
+    const alertBox = document.getElementById('manageUsersAlert');
+
+    function showAlert(message, type) {
+      if (!alertBox) return;
+      alertBox.style.display = 'block';
+      alertBox.className = ''; // reset
+      if (type === 'success') {
+        alertBox.classList.add('manage-users-alert-success');
+      } else {
+        alertBox.classList.add('manage-users-alert-error');
+      }
+      alertBox.textContent = message;
+    }
+
+    document.querySelectorAll('.btn-delete-user').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const userId = this.dataset.userId;
+        if (!userId) return;
+
+        if (!confirm('Are you sure you want to delete this user?')) {
+          return;
         }
 
-        header {
-            background-color:none;
-            padding: 15px 30px;
-            color: #fff;
-        }
+        fetch('manage-users.php', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+          body: new URLSearchParams({
+            action: 'delete',
+            user_id: userId,
+            csrf_token: csrfToken
+          })
+        })
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            showAlert(data.message || 'User deleted.', 'success');
 
-        h1 {
-            margin: 0;
-        }
-
-        main {
-            padding: 30px;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-            background: #fff;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-        }
-
-        th, td {
-            padding: 12px 15px;
-            border: 1px solid #dee2e6;
-            text-align: left;
-        }
-
-        th {
-            background-color: #007bff;
-            color: white;
-        }
-
-        tr:hover {
-            background-color: #f1f1f1;
-        }
-
-        button {
-            padding: 6px 12px;
-            background-color: #dc3545;
-            color: white;
-            border: none;
-            cursor: pointer;
-            border-radius: 4px;
-        }
-
-        button:hover {
-            background-color: #c82333;
-        }
-
-        form {
-            display: inline;
-        }
-    </style>
-</head>
-<body>
-
-<header>
-    <h1>Admin Dashboard - Manage Users</h1>
-</header>
-
-<main>
-    <h2>All Registered Users</h2>
-
-    <table>
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Full Name</th>
-                <th>Email</th>
-                <th>Phone</th>
-                <th>Role</th>
-                <th>Gender</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            <?php if (!empty($users)): ?>
-                <?php foreach ($users as $user): ?>
-                    <tr>
-                        <td><?= htmlspecialchars($user['id']) ?></td>
-                        <td><?= htmlspecialchars($user['first_name'] . ' ' . $user['last_name']) ?></td>
-                        <td><?= htmlspecialchars($user['email']) ?></td>
-                        <td><?= htmlspecialchars($user['phone']) ?></td>
-                        <td><?= htmlspecialchars($user['role']) ?></td>
-                        <td><?= htmlspecialchars($user['gender']) ?></td>
-                        <td>
-                            <form method="POST" onsubmit="return confirm('Are you sure you want to delete this user?');">
-                                <input type="hidden" name="delete_user_id" value="<?= $user['id'] ?>">
-                                <button type="submit">Delete</button>
-                            </form>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-            <?php else: ?>
-                <tr><td colspan="7">No users found.</td></tr>
-            <?php endif; ?>
-        </tbody>
-    </table>
-</main>
-
-</body>
-</html>
-
+            // Remove row from table
+            const row = document.querySelector('tr[data-user-id="' + userId + '"]');
+            if (row && row.parentNode) {
+              row.parentNode.removeChild(row);
+            }
+          } else {
+            showAlert(data.message || 'Delete failed.', 'error');
+          }
+        })
+        .catch(err => {
+          console.error(err);
+          showAlert('An error occurred while deleting user.', 'error');
+        });
+      });
+    });
+  })();
+</script>
