@@ -13,7 +13,7 @@
   <img src="assets/img/logo.png" alt="EduSphere Logo" class="logo">
   <span class="brand-text">EduSphere</span>
 </div>
-    <p>An Intelligent School Management Portal</p>
+    <p>Smart School Management Portal</p>
     <nav>
       <a href="auth/login.php">Login</a>
       <a href="auth/register.php">Register</a>
@@ -25,9 +25,9 @@
       <div class="container">
         <h2>Revolutionize Your School Experience</h2>
         <p>
-          EduSphere is an intelligent school management portal that simplifies
-          admin tasks, predicts dropouts, schedules classes, and boosts student
-          engagement—all in one place.
+          EduSphere is an smart school management portal that simplifies
+          admin tasks, event recomendation to student, predicts dropouts, schedules classes, and boosts student
+          engagement all in one place.
         </p>
         <a href="auth/register.php" class="btn">Get Started</a>
       </div>
@@ -38,8 +38,8 @@
         <h3>Key Features</h3>
         <div class="feature-grid">
           <div class="feature">
-            <h4>Dropout Prediction</h4>
-            <p>Identify at-risk students early with data-driven insights.</p>
+            <h4>Event Recomendation For Students</h4>
+            <p>Recomend event to the student according to their interest.</p>
           </div>
           <div class="feature">
             <h4>Automated Scheduling</h4>
@@ -51,7 +51,7 @@
           </div>
           <div class="feature">
             <h4>Parent & Teacher Collaboration</h4>
-            <p>Enhance communication between parents, students, and staff.</p>
+            <p>Enhance communication between parents by viewing student's progress </p>
           </div>
         </div>
       </div>
