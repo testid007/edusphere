@@ -1,256 +1,201 @@
 <?php
 session_start();
 
-// DB connection settings (adjust to your environment)
-$mysqli = new mysqli('localhost', 'root', '', 'edusphere');
-if ($mysqli->connect_errno) {
-    die("Failed to connect to MySQL: " . $mysqli->connect_error);
+if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'teacher') {
+    header('Location: ../../auth/login.php');
+    exit;
 }
 
-$teacher_name = $_SESSION['teacher_name'] ?? 'Teacher';
+require_once '../../includes/db.php';
+
+$teacher_name  = $_SESSION['teacher_name']  ?? 'Teacher';
 $teacher_email = $_SESSION['teacher_email'] ?? 'teacher@example.com';
 
-$action = $_GET['action'] ?? '';
-
-if ($action === 'list') {
-    $result = $mysqli->query("SELECT g.*, '' AS student_name FROM grades g ORDER BY g.date_added DESC");
-    if ($result) {
-        $data = $result->fetch_all(MYSQLI_ASSOC);
-        echo json_encode(['success' => true, 'data' => $data]);
-    } else {
-        echo json_encode(['success' => false, 'message' => 'Failed to fetch grades']);
-    }
-    exit;
-}
-
-if ($action === 'get' && isset($_GET['id'])) {
-    $id = intval($_GET['id']);
-    $stmt = $mysqli->prepare("SELECT * FROM grades WHERE id = ?");
-    $stmt->bind_param('i', $id);
-    $stmt->execute();
-    $res = $stmt->get_result();
-    $grade = $res->fetch_assoc();
-    if ($grade) {
-        echo json_encode(['success' => true, 'data' => $grade]);
-    } else {
-        echo json_encode(['success' => false, 'message' => 'Grade not found']);
-    }
-    exit;
-}
-
-if ($action === 'create' || $action === 'update') {
-    $student_id = intval($_POST['student_id'] ?? 0);
-    $category = $_POST['category'] ?? '';
-    $title = $_POST['title'] ?? '';
-    $score = $_POST['score'] ?? '';
-    $grade_val = $_POST['grade'] ?? '';
-    $comments = $_POST['comments'] ?? '';
-
-    $errors = [];
-    if ($student_id <= 0) $errors[] = "Invalid student ID";
-    if (!in_array($category, ['Assignment', 'Exam', 'Discipline', 'Classroom Activity'])) $errors[] = "Invalid category";
-    if (!$title) $errors[] = "Title is required";
-    if (!$score) $errors[] = "Score is required";
-
-    if (count($errors) > 0) {
-        echo json_encode(['success' => false, 'errors' => $errors]);
-        exit;
-    }
-
-    if ($action === 'create') {
-        $stmt = $mysqli->prepare("INSERT INTO grades (student_id, category, title, score, grade, comments) VALUES (?, ?, ?, ?, ?, ?)");
-        $stmt->bind_param('isssss', $student_id, $category, $title, $score, $grade_val, $comments);
-        $exec = $stmt->execute();
-        if ($exec) {
-            echo json_encode(['success' => true, 'message' => 'Grade added successfully']);
-        } else {
-            echo json_encode(['success' => false, 'message' => 'DB error: ' . $stmt->error]);
+// ---------- AJAX HANDLERS ----------
+if (isset($_GET['action'])) {
+    header('Content-Type: application/json; charset=utf-8');
+    $action = $_GET['action'];
+    try {
+        if ($action === 'list') {
+            // Join with users to show student name (optional)
+            $stmt = $conn->query("
+                SELECT g.*, 
+                       CONCAT(u.first_name, ' ', u.last_name) AS student_name
+                FROM grades g
+                LEFT JOIN users u ON g.student_id = u.id
+                ORDER BY g.date_added DESC
+            ");
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            echo json_encode(['success' => true, 'data' => $rows]);
+            exit;
         }
-        exit;
-    }
 
-    if ($action === 'update' && isset($_POST['id'])) {
-        $id = intval($_POST['id']);
-        $stmt = $mysqli->prepare("UPDATE grades SET student_id=?, category=?, title=?, score=?, grade=?, comments=? WHERE id=?");
-        $stmt->bind_param('isssssi', $student_id, $category, $title, $score, $grade_val, $comments, $id);
-        $exec = $stmt->execute();
-        if ($exec) {
-            echo json_encode(['success' => true, 'message' => 'Grade updated successfully']);
-        } else {
-            echo json_encode(['success' => false, 'message' => 'DB error: ' . $stmt->error]);
+        if ($action === 'get' && isset($_GET['id'])) {
+            $id   = (int)$_GET['id'];
+            $stmt = $conn->prepare("SELECT * FROM grades WHERE id = ?");
+            $stmt->execute([$id]);
+            $grade = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($grade) {
+                echo json_encode(['success' => true, 'data' => $grade]);
+            } else {
+                echo json_encode(['success' => false, 'message' => 'Grade not found']);
+            }
+            exit;
         }
+
+        if ($action === 'create' || $action === 'update') {
+            $student_id = (int)($_POST['student_id'] ?? 0);
+            $category   = trim($_POST['category'] ?? '');
+            $title      = trim($_POST['title'] ?? '');
+            $score      = trim($_POST['score'] ?? '');
+            $grade_val  = trim($_POST['grade'] ?? '');
+            $comments   = trim($_POST['comments'] ?? '');
+
+            $errors = [];
+            if ($student_id <= 0) $errors[] = 'Invalid student ID';
+            $allowed_cat = ['Assignment','Exam','Discipline','Classroom Activity'];
+            if (!in_array($category, $allowed_cat, true)) $errors[] = 'Invalid category';
+            if ($title === '')  $errors[] = 'Title is required';
+            if ($score === '')  $errors[] = 'Score is required';
+
+            if (!empty($errors)) {
+                echo json_encode(['success' => false, 'errors' => $errors]);
+                exit;
+            }
+
+            if ($action === 'create') {
+                $stmt = $conn->prepare("
+                    INSERT INTO grades (student_id, category, title, score, grade, comments)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ");
+                $ok = $stmt->execute([$student_id, $category, $title, $score, $grade_val, $comments]);
+                echo json_encode([
+                    'success' => $ok,
+                    'message' => $ok ? 'Grade added successfully' : 'Failed to add grade'
+                ]);
+                exit;
+            } else { // update
+                if (empty($_POST['id'])) {
+                    echo json_encode(['success' => false, 'message' => 'Missing grade ID']);
+                    exit;
+                }
+                $id   = (int)$_POST['id'];
+                $stmt = $conn->prepare("
+                    UPDATE grades
+                    SET student_id = ?, category = ?, title = ?, score = ?, grade = ?, comments = ?
+                    WHERE id = ?
+                ");
+                $ok = $stmt->execute([$student_id, $category, $title, $score, $grade_val, $comments, $id]);
+                echo json_encode([
+                    'success' => $ok,
+                    'message' => $ok ? 'Grade updated successfully' : 'Failed to update grade'
+                ]);
+                exit;
+            }
+        }
+
+        if ($action === 'delete' && isset($_POST['id'])) {
+            $id   = (int)$_POST['id'];
+            $stmt = $conn->prepare("DELETE FROM grades WHERE id = ?");
+            $ok   = $stmt->execute([$id]);
+            echo json_encode([
+                'success' => $ok,
+                'message' => $ok ? 'Grade deleted successfully' : 'Failed to delete grade'
+            ]);
+            exit;
+        }
+
+        echo json_encode(['success' => false, 'message' => 'Invalid action']);
+        exit;
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => 'Server error: ' . $e->getMessage()]);
         exit;
     }
 }
 
-if ($action === 'delete' && isset($_POST['id'])) {
-    $id = intval($_POST['id']);
-    $stmt = $mysqli->prepare("DELETE FROM grades WHERE id = ?");
-    $stmt->bind_param('i', $id);
-    if ($stmt->execute()) {
-        echo json_encode(['success' => true, 'message' => 'Grade deleted successfully']);
-    } else {
-        echo json_encode(['success' => false, 'message' => 'Failed to delete grade']);
-    }
-    exit;
-}
-
-// If no action, output HTML below:
-header('Content-Type: text/html');
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Grade Book</title>
-<link rel="stylesheet" href="../../assets/css/dashboard.css" />
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
-<style>
-  form.grade-form {
-    background: #ffffff;
-    padding: 20px 25px;
-    border-radius: 14px;
-    box-shadow: 0 3px 15px rgba(76,175,80,0.08);
-    max-width: 600px;
-    margin: 2rem auto 3rem;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    color: #333;
-    transition: box-shadow 0.3s ease;
-  }
-  form.grade-form:hover {
-    box-shadow: 0 5px 25px rgba(76,175,80,0.15);
-  }
-  form.grade-form label {
-    display: block;
-    font-weight: 600;
-    margin-bottom: 8px;
-    color: #388e3c;
-    letter-spacing: 0.03em;
-  }
-  form.grade-form input[type="text"],
-  form.grade-form input[type="number"],
-  form.grade-form select,
-  form.grade-form textarea {
-    width: 100%;
-    padding: 10px 14px;
-    border: 2px solid #b2ded8;
-    border-radius: 10px;
-    background-color: #f0f9f8;
-    font-size: 16px;
-    color: #0e766f;
-    box-sizing: border-box;
-    transition: border-color 0.3s ease, background-color 0.3s ease;
-  }
-  form.grade-form input[type="text"]:focus,
-  form.grade-form input[type="number"]:focus,
-  form.grade-form select:focus,
-  form.grade-form textarea:focus {
-    outline: none;
-    border-color: #4caf50;
-    background-color: #e0f3f2;
-    box-shadow: 0 0 8px rgba(76,175,80,0.12);
-  }
-  form.grade-form button {
-    background-color: #4caf50;
-    color: white;
-    font-weight: 700;
-    border: none;
-    border-radius: 12px;
-    padding: 12px 25px;
-    font-size: 16px;
-    cursor: pointer;
-    transition: background-color 0.25s ease;
-    box-shadow: 0 3px 10px rgba(76,175,80,0.10);
-  }
-  form.grade-form button:hover {
-    background-color: #388e3c;
-    box-shadow: 0 4px 15px rgba(56,142,60,0.13);
-  }
-  form.grade-form button#cancelBtn {
-    background-color: #e74c3c;
-    box-shadow: 0 3px 10px rgba(231, 76, 60, 0.13);
-    margin-left: 12px;
-  }
-  form.grade-form button#cancelBtn:hover {
-    background-color: #c0392b;
-    box-shadow: 0 4px 15px rgba(192, 57, 43, 0.18);
-  }
-  form.grade-form input::placeholder,
-  form.grade-form textarea::placeholder {
-    color: #72b8af;
-    font-style: italic;
-  }
-  @media (max-width: 650px) {
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Grade Book</title>
+  <link rel="stylesheet" href="../../assets/css/dashboard.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <style>
     form.grade-form {
-      padding: 15px 20px;
+      background:#ffffff;
+      padding:20px 25px;
+      border-radius:14px;
+      box-shadow:0 3px 15px rgba(76,175,80,0.08);
+      max-width:600px;
+      margin:2rem auto 3rem;
+    }
+    form.grade-form label {
+      display:block;
+      font-weight:600;
+      margin-bottom:8px;
+      color:#388e3c;
+    }
+    form.grade-form input[type="text"],
+    form.grade-form input[type="number"],
+    form.grade-form select,
+    form.grade-form textarea {
+      width:100%;
+      padding:10px 14px;
+      border:2px solid #b2ded8;
+      border-radius:10px;
+      background-color:#f0f9f8;
+      margin-bottom:12px;
+      font-size:15px;
     }
     form.grade-form button {
-      width: 100%;
-      margin-bottom: 10px;
+      background:#4caf50;
+      color:#fff;
+      border:none;
+      border-radius:12px;
+      padding:10px 20px;
+      font-weight:700;
+      cursor:pointer;
     }
     form.grade-form button#cancelBtn {
-      margin-left: 0;
+      background:#e74c3c;
+      margin-left:10px;
     }
-  }
-  .gradebook-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 2rem 0;
-    background: #fff;
-    border-radius: 10px;
-    overflow: hidden;
-    font-size: 1rem;
-  }
-  .gradebook-table th, .gradebook-table td {
-    padding: 10px 12px;
-    border-bottom: 1px solid #e0e0e0;
-    text-align: left;
-  }
-  .gradebook-table th {
-    background: #4caf50;
-    color: #fff;
-    font-weight: 700;
-  }
-  .gradebook-table tr:last-child td {
-    border-bottom: none;
-  }
-  .gradebook-table tr:hover {
-    background: #f6fff6;
-  }
-  .btn-edit, .btn-delete {
-    background: #4caf50;
-    color: #fff;
-    border: none;
-    border-radius: 6px;
-    padding: 5px 12px;
-    margin-right: 6px;
-    cursor: pointer;
-    font-size: 0.97rem;
-    transition: background 0.2s;
-  }
-  .btn-delete {
-    background: #e74c3c;
-  }
-  .btn-edit:hover {
-    background: #388e3c;
-  }
-  .btn-delete:hover {
-    background: #c0392b;
-  }
-  .message {
-    padding: 12px 18px;
-    border-radius: 8px;
-    margin-bottom: 18px;
-    font-weight: 600;
-    display: none;
-  }
-  .message.success { background: #e8f5e9; color: #388e3c; }
-  .message.error { background: #ffebee; color: #c0392b; }
-  .sidebar .profile .name { color: #222; }
-  .sidebar .profile .email { color: #555; }
-</style>
+    .message {
+      padding:12px 18px;
+      border-radius:8px;
+      margin-bottom:18px;
+      font-weight:600;
+      display:none;
+    }
+    .message.success { background:#e8f5e9;color:#388e3c; }
+    .message.error { background:#ffebee;color:#c0392b; }
+    table.gradebook-table {
+      width:100%;
+      border-collapse:collapse;
+      margin:2rem 0;
+      background:#fff;
+      border-radius:10px;
+      overflow:hidden;
+    }
+    .gradebook-table th,.gradebook-table td {
+      padding:10px 12px;
+      border-bottom:1px solid #e0e0e0;
+      text-align:left;
+      font-size:0.9rem;
+    }
+    .gradebook-table th {
+      background:#4caf50;
+      color:#fff;
+    }
+    .btn-edit,.btn-delete {
+      border:none;border-radius:6px;padding:5px 10px;font-size:0.9rem;cursor:pointer;
+      color:#fff;
+    }
+    .btn-edit { background:#4caf50; }
+    .btn-delete { background:#e74c3c; }
+  </style>
 </head>
 <body>
 <div class="container">
@@ -263,7 +208,6 @@ header('Content-Type: text/html');
       <a href="manage-assignments.php"><i class="fas fa-tasks"></i> Manage Assignments</a>
       <a href="gradebook.php" class="active"><i class="fas fa-book-open"></i> Grade Book</a>
       <a href="attendance.php"><i class="fas fa-user-check"></i> Attendance</a>
-      <a href="communication.php"><i class="fas fa-comments"></i> Communication</a>
       <a href="/edusphere/auth/logout.php" class="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
     </nav>
     <div class="profile">
@@ -280,10 +224,10 @@ header('Content-Type: text/html');
     </header>
 
     <section>
-      <div id="message" class="message" style="display:none;"></div>
+      <div id="message" class="message"></div>
 
       <form id="gradeForm" class="grade-form">
-        <input type="hidden" id="grade-id" name="id" value="" />
+        <input type="hidden" id="grade-id" name="id" />
 
         <label for="student_id">Student ID</label>
         <input type="number" id="student_id" name="student_id" required placeholder="Enter Student ID" />
@@ -307,10 +251,10 @@ header('Content-Type: text/html');
         <input type="text" id="grade" name="grade" placeholder="Enter grade (optional)" />
 
         <label for="comments">Comments</label>
-        <textarea id="comments" name="comments" rows="3" placeholder="Enter comments (optional)"></textarea>
+        <textarea id="comments" name="comments" rows="3" placeholder="Comments (optional)"></textarea>
 
         <button type="submit" id="submitBtn">Add Grade</button>
-        <button type="button" id="cancelBtn" style="display:none; margin-left: 10px;">Cancel</button>
+        <button type="button" id="cancelBtn" style="display:none;">Cancel</button>
       </form>
 
       <h3>Grades List</h3>
@@ -318,7 +262,7 @@ header('Content-Type: text/html');
         <thead>
           <tr>
             <th>ID</th>
-            <th>Student ID</th>
+            <th>Student</th>
             <th>Category</th>
             <th>Title</th>
             <th>Score</th>
@@ -328,28 +272,33 @@ header('Content-Type: text/html');
             <th>Actions</th>
           </tr>
         </thead>
-        <tbody>
-          <!-- Filled dynamically -->
-        </tbody>
+        <tbody></tbody>
       </table>
     </section>
   </main>
 </div>
 
 <script>
-  const messageBox = document.getElementById('message');
-  const gradeForm = document.getElementById('gradeForm');
-  const submitBtn = document.getElementById('submitBtn');
-  const cancelBtn = document.getElementById('cancelBtn');
-  const gradesTableBody = document.querySelector('#gradesTable tbody');
+  const msgBox   = document.getElementById('message');
+  const gradeForm= document.getElementById('gradeForm');
+  const submitBtn= document.getElementById('submitBtn');
+  const cancelBtn= document.getElementById('cancelBtn');
+  const tbody    = document.querySelector('#gradesTable tbody');
 
   let editingId = null;
 
-  function showMessage(text, type = 'success') {
-    messageBox.textContent = text;
-    messageBox.className = 'message ' + (type === 'success' ? 'success' : 'error');
-    messageBox.style.display = 'block';
-    setTimeout(() => { messageBox.style.display = 'none'; }, 4000);
+  function showMessage(text, type='success') {
+    msgBox.textContent = text;
+    msgBox.className = 'message ' + (type === 'success' ? 'success' : 'error');
+    msgBox.style.display = 'block';
+    setTimeout(() => msgBox.style.display = 'none', 4000);
+  }
+
+  function escapeHtml(text) {
+    if (!text) return '';
+    return text.replace(/[&<>"']/g, m => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    })[m]);
   }
 
   function clearForm() {
@@ -364,83 +313,83 @@ header('Content-Type: text/html');
     fetch('?action=list')
       .then(res => res.json())
       .then(data => {
-        if (data.success) {
-          gradesTableBody.innerHTML = '';
-          if (data.data.length === 0) {
-            gradesTableBody.innerHTML = '<tr><td colspan="9">No grades found.</td></tr>';
-            return;
-          }
-          data.data.forEach(g => {
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-              <td>${g.id}</td>
-              <td>${g.student_id}</td>
-              <td>${escapeHtml(g.category)}</td>
-              <td>${escapeHtml(g.title)}</td>
-              <td>${escapeHtml(g.score)}</td>
-              <td>${escapeHtml(g.grade || '')}</td>
-              <td>${escapeHtml(g.comments || '')}</td>
-              <td>${g.date_added}</td>
-              <td>
-                <button class="btn-edit" data-id="${g.id}">Edit</button>
-                <button class="btn-delete" data-id="${g.id}">Delete</button>
-              </td>
-            `;
-            gradesTableBody.appendChild(tr);
-          });
-          attachTableEvents();
-        } else {
+        if (!data.success) {
           showMessage('Failed to load grades.', 'error');
+          return;
         }
+        tbody.innerHTML = '';
+        if (!data.data || data.data.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="9">No grades found.</td></tr>';
+          return;
+        }
+        data.data.forEach(g => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${g.id}</td>
+            <td>${escapeHtml(g.student_name || ('ID ' + g.student_id))}</td>
+            <td>${escapeHtml(g.category)}</td>
+            <td>${escapeHtml(g.title)}</td>
+            <td>${escapeHtml(g.score)}</td>
+            <td>${escapeHtml(g.grade || '')}</td>
+            <td>${escapeHtml(g.comments || '')}</td>
+            <td>${escapeHtml(g.date_added || '')}</td>
+            <td>
+              <button class="btn-edit" data-id="${g.id}">Edit</button>
+              <button class="btn-delete" data-id="${g.id}">Delete</button>
+            </td>
+          `;
+          tbody.appendChild(tr);
+        });
+        attachRowHandlers();
       })
       .catch(() => showMessage('Error loading grades.', 'error'));
   }
 
-  function attachTableEvents() {
+  function attachRowHandlers() {
     document.querySelectorAll('.btn-edit').forEach(btn => {
-      btn.onclick = function(e) {
+      btn.onclick = e => {
         e.preventDefault();
-        const id = this.getAttribute('data-id');
+        const id = btn.dataset.id;
         fetch(`?action=get&id=${id}`)
           .then(res => res.json())
           .then(data => {
-            if (data.success) {
-              editingId = id;
-              submitBtn.textContent = 'Update Grade';
-              cancelBtn.style.display = 'inline-block';
-
-              document.getElementById('grade-id').value = data.data.id;
-              document.getElementById('student_id').value = data.data.student_id;
-              document.getElementById('category').value = data.data.category;
-              document.getElementById('title').value = data.data.title;
-              document.getElementById('score').value = data.data.score;
-              document.getElementById('grade').value = data.data.grade || '';
-              document.getElementById('comments').value = data.data.comments || '';
-            } else {
-              showMessage(data.message || 'Failed to load grade data.', 'error');
+            if (!data.success) {
+              showMessage('Failed to load grade.', 'error');
+              return;
             }
+            editingId = id;
+            submitBtn.textContent = 'Update Grade';
+            cancelBtn.style.display = 'inline-block';
+            const g = data.data;
+            document.getElementById('grade-id').value   = g.id;
+            document.getElementById('student_id').value = g.student_id;
+            document.getElementById('category').value   = g.category;
+            document.getElementById('title').value      = g.title;
+            document.getElementById('score').value      = g.score;
+            document.getElementById('grade').value      = g.grade || '';
+            document.getElementById('comments').value   = g.comments || '';
           });
       };
     });
 
     document.querySelectorAll('.btn-delete').forEach(btn => {
-      btn.onclick = function(e) {
+      btn.onclick = e => {
         e.preventDefault();
-        if (!confirm('Are you sure you want to delete this grade?')) return;
-        const id = this.getAttribute('data-id');
+        if (!confirm('Delete this grade?')) return;
+        const id = btn.dataset.id;
         fetch('?action=delete', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-          body: `id=${encodeURIComponent(id)}`
+          method:'POST',
+          headers:{'Content-Type':'application/x-www-form-urlencoded'},
+          body:'id=' + encodeURIComponent(id)
         })
         .then(res => res.json())
         .then(data => {
           if (data.success) {
-            showMessage(data.message, 'success');
+            showMessage(data.message || 'Deleted.', 'success');
             loadGrades();
             if (editingId === id) clearForm();
           } else {
-            showMessage(data.message || 'Failed to delete grade.', 'error');
+            showMessage(data.message || 'Failed to delete.', 'error');
           }
         });
       };
@@ -449,44 +398,33 @@ header('Content-Type: text/html');
 
   gradeForm.addEventListener('submit', e => {
     e.preventDefault();
+    const formData = new URLSearchParams(new FormData(gradeForm));
 
-    const formData = new FormData(gradeForm);
-    const data = {};
-    formData.forEach((v, k) => data[k] = v.trim());
-
-    let action = editingId ? 'update' : 'create';
-    if (editingId) data.id = editingId;
+    let action = 'create';
+    if (editingId) {
+      action = 'update';
+      formData.append('id', editingId);
+    }
 
     fetch(`?action=${action}`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-      body: new URLSearchParams(data)
+      method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body: formData.toString()
     })
     .then(res => res.json())
-    .then(resp => {
-      if (resp.success) {
-        showMessage(resp.message, 'success');
+    .then(data => {
+      if (data.success) {
+        showMessage(data.message || 'Saved.', 'success');
         loadGrades();
         clearForm();
       } else {
-        showMessage((resp.errors && resp.errors.join(', ')) || resp.message || 'Failed to save grade.', 'error');
+        showMessage((data.errors && data.errors.join(', ')) || data.message || 'Failed to save.', 'error');
       }
     })
     .catch(() => showMessage('Error saving grade.', 'error'));
   });
 
-  cancelBtn.onclick = () => clearForm();
-
-  function escapeHtml(text) {
-    if (!text) return '';
-    return text.replace(/[&<>"']/g, m => ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;'
-    })[m]);
-  }
+  cancelBtn.addEventListener('click', clearForm);
 
   loadGrades();
 </script>
