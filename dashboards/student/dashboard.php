@@ -7,30 +7,35 @@ if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'student') {
 }
 
 // Canonical student identity
-$student_id    = (int)($_SESSION['user_id'] ?? ($_SESSION['student_id'] ?? 0));
-$student_name  = $_SESSION['student_name']  ?? 'Student';
-$student_email = $_SESSION['student_email'] ?? 'student@example.com';
-$student_class = $_SESSION['class'] ?? null;
+$student_id      = (int)($_SESSION['user_id'] ?? ($_SESSION['student_id'] ?? 0));
+$student_name    = $_SESSION['student_name']  ?? 'Student';
+$student_email   = $_SESSION['student_email'] ?? 'student@example.com';
+$student_class   = $_SESSION['class'] ?? null;
+$student_avatar  = '../../assets/img/user.jpg';
 
 require_once '../../includes/db.php';
 require_once '../../functions/EventManager.php';
 
 $eventManager = new EventManager($conn);
 
-// ---------- DASHBOARD STATS (match to your schema) ----------
+// ---------- DASHBOARD STATS ----------
 $stats = [
     'upcoming_assignments' => 0,
+    'overdue_assignments'  => 0,
     'avg_score'            => null,
     'total_results'        => 0,
     'last_result_at'       => null,
+    'attendance_present'   => 0,
+    'attendance_total'     => 0,
+    'attendance_percent'   => null,
     'total_fee_paid'       => 0.00,
     'fee_status'           => 'Pending',
     'unread_notices'       => 0,
 ];
 
-// 1) Upcoming assignments (if you have assignments + submissions tables)
+/** Upcoming + overdue assignments for this student (next 7 days / past due) */
 try {
-    // TODO: adjust if your assignment schema is different
+    // upcoming unsubmitted this week
     $stmt = $conn->prepare("
         SELECT COUNT(*) 
         FROM assignments a
@@ -42,13 +47,24 @@ try {
     ");
     $stmt->execute([$student_id]);
     $stats['upcoming_assignments'] = (int)$stmt->fetchColumn();
-} catch (Exception $e) {
-    // silently ignore if those tables don't exist
-}
 
-// 2) Result / grade summary from grades table
+    // overdue unsubmitted
+    $stmt = $conn->prepare("
+        SELECT COUNT(*) 
+        FROM assignments a
+        LEFT JOIN assignment_submissions s 
+               ON a.id = s.assignment_id AND s.student_id = ?
+        WHERE a.due_date IS NOT NULL
+          AND a.due_date < CURDATE()
+          AND (s.id IS NULL OR s.status <> 'submitted')
+    ");
+    $stmt->execute([$student_id]);
+    $stats['overdue_assignments'] = (int)$stmt->fetchColumn();
+} catch (Exception $e) {}
+
+/** Grade summary + recent grade trend */
+$gradeTrend = [];
 try {
-    // grades: category, title, score, grade, comments, date_added, student_id
     $stmt = $conn->prepare("
         SELECT AVG(score) AS avg_score,
                COUNT(*)   AS total_rows,
@@ -63,11 +79,42 @@ try {
         $stats['total_results']  = (int)$row['total_rows'];
         $stats['last_result_at'] = $row['last_date'] ?? null;
     }
+
+    // latest 8 grade entries for trend chart
+    $stmt = $conn->prepare("
+        SELECT DATE(date_added) AS d, score
+        FROM grades
+        WHERE student_id = :sid
+        ORDER BY date_added ASC
+        LIMIT 8
+    ");
+    $stmt->execute([':sid' => $student_id]);
+    $gradeTrend = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (Exception $e) {}
 
-// 3) Fee summary from fees table
+/** Attendance summary for this student */
 try {
-    // fees: student_id, class_name, description, amount, ...
+    $stmt = $conn->prepare("
+        SELECT 
+          SUM(CASE WHEN status = 'present' THEN 1 ELSE 0 END) AS present_days,
+          COUNT(*) AS total_records
+        FROM attendance
+        WHERE student_id = :sid
+    ");
+    $stmt->execute([':sid' => $student_id]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($row && (int)$row['total_records'] > 0) {
+        $stats['attendance_present'] = (int)$row['present_days'];
+        $stats['attendance_total']   = (int)$row['total_records'];
+        $stats['attendance_percent'] = round(
+            $row['present_days'] / $row['total_records'] * 100,
+            1
+        );
+    }
+} catch (Exception $e) {}
+
+/** Fee summary */
+try {
     $sql = "SELECT COALESCE(SUM(amount),0) AS total_paid FROM fees WHERE student_id = :sid";
     $params = [':sid' => $student_id];
     if ($student_class) {
@@ -83,37 +130,37 @@ try {
     }
 } catch (Exception $e) {}
 
-// 4) Unread notices (adapt table/columns if needed)
+/** Unread notices + last few items */
+$recentNotices = [];
 try {
     $stmt = $conn->prepare("
-        SELECT COUNT(*) 
+        SELECT id, title, created_at
         FROM notices
         WHERE (student_id = :sid OR student_id IS NULL)
           AND (is_read = 0 OR is_read IS NULL)
+        ORDER BY created_at DESC
+        LIMIT 5
     ");
     $stmt->execute([':sid' => $student_id]);
-    $stats['unread_notices'] = (int)$stmt->fetchColumn();
+    $recentNotices = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $stats['unread_notices'] = count($recentNotices);
 } catch (Exception $e) {}
 
+/** Recommended events */
+$recommendedEvents = $eventManager->getStudentRecommendedEvents($student_id, 4);
 
-// ---------- Recommended events with “time left” ----------
-$recommendedEvents = $eventManager->getStudentRecommendedEvents($student_id, 5);
-
+// ---------- Helper for time to event ----------
 function computeTimeLeftLabel(?string $date, ?string $time): string {
     if (empty($date)) return '';
-
     try {
         $datePart = $date;
         $timePart = $time ?: '00:00:00';
         $eventDT  = new DateTime("$datePart $timePart");
         $now      = new DateTime();
 
-        if ($eventDT < $now) {
-            return 'Already happened';
-        }
+        if ($eventDT < $now) return 'Already happened';
 
         $diff = $now->diff($eventDT);
-
         if ($diff->days > 0) {
             return 'in ' . $diff->days . ' day' . ($diff->days > 1 ? 's' : '');
         }
@@ -129,7 +176,6 @@ function computeTimeLeftLabel(?string $date, ?string $time): string {
     }
 }
 
-// Attach label into each event
 foreach ($recommendedEvents as &$ev) {
     $ev['time_left_label'] = computeTimeLeftLabel(
         $ev['event_date'] ?? null,
@@ -138,52 +184,33 @@ foreach ($recommendedEvents as &$ev) {
 }
 unset($ev);
 
-// ---------- Build notification list for the bell ----------
+// ---------- Notification list ----------
 $notifications = [];
 
-// Upcoming assignments
 if ($stats['upcoming_assignments'] > 0) {
     $notifications[] = [
         'type' => 'assignment',
-        'text' => "You have {$stats['upcoming_assignments']} assignment(s) due in the next 7 days."
+        'text' => "You have {$stats['upcoming_assignments']} assignment(s) due this week."
     ];
 }
-
-// Fee status (pending if no payment yet)
+if ($stats['overdue_assignments'] > 0) {
+    $notifications[] = [
+        'type' => 'warning',
+        'text' => "{$stats['overdue_assignments']} assignment(s) are overdue."
+    ];
+}
 if ($stats['fee_status'] === 'Pending') {
     $notifications[] = [
         'type' => 'fee',
-        'text' => "Your fee payment is pending. Please check Fee Details."
+        'text' => "Your fee payment is pending. Check your Fee Details."
     ];
 }
-
-// Recent results (new in last 7 days)
-if (!empty($stats['last_result_at'])) {
-    try {
-        $lastResult = new DateTime($stats['last_result_at']);
-        $now        = new DateTime();
-        $diff       = $now->diff($lastResult);
-        if ($diff->days <= 7) {
-            $notifications[] = [
-                'type' => 'result',
-                'text' => "New result/grade has been added. Check your results."
-            ];
-        }
-    } catch (Exception $e) {}
+if ($stats['attendance_percent'] !== null && $stats['attendance_percent'] < 75) {
+    $notifications[] = [
+        'type' => 'attendance',
+        'text' => "Your attendance is below 75%. Try not to miss upcoming classes."
+    ];
 }
-
-// Upcoming event (take the soonest future recommended one)
-foreach ($recommendedEvents as $ev) {
-    if (!empty($ev['time_left_label']) && $ev['time_left_label'] !== 'Already happened') {
-        $notifications[] = [
-            'type' => 'event',
-            'text' => "Upcoming event: {$ev['title']} ({$ev['time_left_label']})."
-        ];
-        break;
-    }
-}
-
-// Unread notices
 if ($stats['unread_notices'] > 0) {
     $notifications[] = [
         'type' => 'notice',
@@ -193,20 +220,19 @@ if ($stats['unread_notices'] > 0) {
 
 $notificationCount = count($notifications);
 
-// ---------- To-do list initial suggestions ----------
+// Initial to-dos (seed To-Do widget)
 $initialTodos = [];
-
 if ($stats['upcoming_assignments'] > 0) {
-    $initialTodos[] = "Complete upcoming assignment(s) due this week.";
+    $initialTodos[] = "Finish assignments due this week.";
+}
+if ($stats['overdue_assignments'] > 0) {
+    $initialTodos[] = "Clear overdue assignment backlog.";
 }
 if (!empty($recommendedEvents)) {
-    $initialTodos[] = "Check details for event: " . $recommendedEvents[0]['title'];
+    $initialTodos[] = "Pick at least one event to participate in this month.";
 }
-if ($stats['fee_status'] === 'Pending') {
-    $initialTodos[] = "Review your fee status and make payment.";
-}
-if ($stats['unread_notices'] > 0) {
-    $initialTodos[] = "Read {$stats['unread_notices']} unread notice(s).";
+if ($stats['attendance_percent'] !== null && $stats['attendance_percent'] < 90) {
+    $initialTodos[] = "Aim for full attendance this week.";
 }
 ?>
 <!DOCTYPE html>
@@ -214,122 +240,428 @@ if ($stats['unread_notices'] > 0) {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Student Dashboard</title>
+  <title>Student Dashboard | EduSphere</title>
   <link rel="stylesheet" href="../../assets/css/dashboard.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
   <style>
-    .stat-card h3 {
-      margin: 0 0 6px;
-      font-size: 1rem;
-      color: #4caf50;
+    :root {
+      --bg-page: #f5eee9;
+      --bg-shell: #fdfcfb;
+      --bg-sidebar: #fdf5ec;
+      --bg-main: #ffffff;
+
+      --accent: #f59e0b;
+      --accent-soft: #fff5e5;
+
+      --text-main: #111827;
+      --text-muted: #6b7280;
+
+      --border-soft: #f3e5d7;
+      --shadow-card: 0 12px 30px rgba(15,23,42,0.06);
     }
-    .stat-card .big-number {
-      font-size: 1.8rem;
-      font-weight: 700;
-      color: #111;
-      margin-bottom: 4px;
-    }
-    .stat-card .sub-text {
-      font-size: 0.85rem;
-      color: #666;
+    * { box-sizing:border-box; }
+    body {
+      margin:0;
+      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      background:var(--bg-page);
+      color:var(--text-main);
     }
 
-    .events-section {
-      margin-top: 30px;
-    }
-    .events-section h3 {
-      margin-bottom: 12px;
-    }
-    .event-card {
-      background: #ffffff;
-      padding: 12px 16px;
-      border-radius: 8px;
-      margin-bottom: 10px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-    }
-    .event-card h4 {
-      margin: 0 0 4px;
-      font-size: 1rem;
-    }
-    .event-meta {
-      font-size: 0.85rem;
-      color: #555;
-      line-height: 1.4;
-    }
-    .event-meta .time-left {
-      font-weight: 600;
-      color: #4caf50;
+    .app-shell {
+      width:100%;
+      display:grid;
+      grid-template-columns:260px 1fr;
+      min-height:100vh;
+      background:var(--bg-shell);
     }
 
-    /* Notification tags */
+    /* SIDEBAR (shared style with other pages) */
+    .sidebar {
+      background:var(--bg-sidebar);
+      border-right:1px solid var(--border-soft);
+      padding:28px 22px;
+      display:flex;
+      flex-direction:column;
+      justify-content:space-between;
+    }
+    .logo {
+      display:flex;
+      align-items:center;
+      gap:10px;
+      margin-bottom:28px;
+    }
+    .logo img { height:40px; }
+    .logo span {
+      font-weight:700;
+      font-size:1.15rem;
+      color:#1f2937;
+      letter-spacing:0.04em;
+    }
+    .nav {
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+    .nav a {
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:11px 14px;
+      border-radius:999px;
+      color:#6b7280;
+      font-size:0.95rem;
+      text-decoration:none;
+      transition:background .15s,color .15s,transform .15s,box-shadow .15s;
+    }
+    .nav a i {
+      width:20px;
+      text-align:center;
+      color:#9ca3af;
+    }
+    .nav a.active {
+      background:var(--accent-soft);
+      color:#92400e;
+      font-weight:600;
+      box-shadow:0 10px 22px rgba(245,158,11,.35);
+    }
+    .nav a.active i { color:#f59e0b; }
+    .nav a:hover {
+      background:#ffeeda;
+      color:#92400e;
+      transform:translateX(3px);
+    }
+    .nav a.logout { margin-top:10px;color:#b91c1c; }
+
+    .sidebar-student-card {
+      margin-top:24px;
+      padding:14px 16px;
+      border-radius:20px;
+      background:radial-gradient(circle at top left,#ffe1b8,#fff7ea);
+      box-shadow:var(--shadow-card);
+      display:flex;
+      align-items:center;
+      gap:12px;
+    }
+    .sidebar-student-card img {
+      width:44px;
+      height:44px;
+      border-radius:50%;
+      object-fit:cover;
+      border:2px solid #fff;
+    }
+    .sidebar-student-card .name {
+      font-size:0.98rem;
+      font-weight:600;
+      color:#78350f;
+    }
+    .sidebar-student-card .role {
+      font-size:0.8rem;
+      color:#92400e;
+    }
+
+    .main {
+      padding:24px 44px 36px;
+      background:radial-gradient(circle at top left,#fff7e6 0,#ffffff 55%);
+    }
+    .main-inner {
+      max-width:1320px;
+      margin:0 auto;
+    }
+
+    .main-header {
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:18px;
+    }
+    .main-header-left h2 {
+      margin:0;
+      font-size:1.8rem;
+      font-weight:700;
+    }
+    .main-header-left p {
+      margin:4px 0 0;
+      color:var(--text-muted);
+      font-size:0.95rem;
+    }
+
+    .header-avatar {
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:6px 14px;
+      border-radius:999px;
+      background:#fff7ea;
+      border:1px solid #fed7aa;
+      min-width:180px;
+    }
+    .header-avatar img {
+      width:32px;
+      height:32px;
+      border-radius:50%;
+      object-fit:cover;
+    }
+    .header-avatar .name {
+      font-size:0.95rem;
+      font-weight:600;
+      color:#78350f;
+    }
+    .header-avatar .role {
+      font-size:0.78rem;
+      color:#c05621;
+    }
+
+    /* NOTIF DROPDOWN */
+    .notif-wrapper { position:relative; }
+    .icon-btn {
+      position:relative;
+      border:none;
+      background:#fdfaf5;
+      border-radius:999px;
+      width:40px;
+      height:40px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      cursor:pointer;
+      border:1px solid #e5e7eb;
+    }
+    .icon-btn i {
+      color:#6b7280;
+      font-size:1rem;
+    }
+    .icon-btn .badge {
+      position:absolute;
+      top:4px;
+      right:4px;
+      background:#ef4444;
+      color:#fff;
+      font-size:0.7rem;
+      padding:2px 5px;
+      border-radius:999px;
+      font-weight:600;
+    }
+    .notif-dropdown {
+      position:absolute;
+      right:0;
+      top:48px;
+      width:290px;
+      max-height:340px;
+      overflow:auto;
+      background:#ffffff;
+      border-radius:18px;
+      box-shadow:0 16px 38px rgba(15,23,42,.35);
+      padding:10px;
+      display:none;
+      border:1px solid var(--border-soft);
+      z-index:15;
+    }
+    .notif-dropdown.active { display:block; }
+    .notif-dropdown h4 {
+      margin:2px 4px 8px;
+      font-size:0.95rem;
+    }
+    .notif-dropdown ul {
+      list-style:none;
+      margin:0;
+      padding:0;
+      font-size:0.86rem;
+    }
+    .notif-dropdown li {
+      padding:7px 6px;
+      border-radius:10px;
+    }
+    .notif-dropdown li + li { margin-top:4px; }
+
     .notif-tag {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 999px;
-      font-size: 0.7rem;
-      font-weight: 600;
-      margin-right: 6px;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
+      display:inline-block;
+      padding:2px 8px;
+      border-radius:999px;
+      font-size:0.7rem;
+      font-weight:600;
+      margin-right:6px;
+      text-transform:uppercase;
+      letter-spacing:0.03em;
     }
-    .notif-assign  { background:#e8f5e9; color:#2e7d32; }
-    .notif-fee     { background:#ffebee; color:#c62828; }
-    .notif-event   { background:#e3f2fd; color:#1565c0; }
-    .notif-result  { background:#f3e5f5; color:#6a1b9a; }
-    .notif-notice  { background:#fff8e1; color:#f9a825; }
+    .notif-assign { background:#e8f5e9;color:#166534; }
+    .notif-warning{ background:#fef3c7;color:#b45309; }
+    .notif-fee    { background:#ffebee;color:#b91c1c; }
+    .notif-event  { background:#e3f2fd;color:#1d4ed8; }
+    .notif-attend { background:#f3e8ff;color:#6b21a8; }
+    .notif-notice { background:#fff8e1;color:#f59e0b; }
 
-    /* To-do list styles */
-    .todo-section {
-      margin-top: 30px;
+    .content-grid {
+      margin-top:10px;
+      display:grid;
+      grid-template-columns:minmax(0,1.8fr) minmax(0,1.2fr);
+      gap:20px;
+      align-items:flex-start;
+    }
+    .left-column,
+    .right-column {
+      display:flex;
+      flex-direction:column;
+      gap:16px;
+    }
+
+    .hero-card {
+      background:radial-gradient(circle at top right,#ffe6b0,#fff7ea);
+      border-radius:20px;
+      padding:18px 20px;
+      box-shadow:var(--shadow-card);
+      display:flex;
+      justify-content:space-between;
+      gap:18px;
+    }
+    .hero-left h3 {
+      margin:0 0 4px;
+      font-size:1.2rem;
+    }
+    .hero-left p {
+      margin:0 0 10px;
+      font-size:0.9rem;
+      color:var(--text-muted);
+    }
+    .hero-metric {
+      display:flex;
+      align-items:flex-end;
+      gap:6px;
+      margin-bottom:8px;
+      font-size:0.92rem;
+      color:var(--text-muted);
+    }
+    .hero-metric span.big {
+      font-size:1.8rem;
+      font-weight:700;
+      color:#b45309;
+    }
+    .hero-btn {
+      border:none;
+      border-radius:999px;
+      background:var(--accent);
+      color:#fff;
+      padding:8px 16px;
+      font-size:0.9rem;
+      font-weight:600;
+      cursor:pointer;
+      box-shadow:0 10px 25px rgba(180,83,9,.45);
+    }
+
+    .hero-right {
+      display:flex;
+      flex-direction:column;
+      align-items:flex-end;
+      justify-content:space-between;
+      gap:8px;
+      min-width:160px;
+    }
+    .hero-pill {
       background:#fff;
-      border-radius: 16px;
-      padding: 18px 22px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+      border-radius:16px;
+      padding:10px 14px;
+      font-size:0.8rem;
+      box-shadow:var(--shadow-card);
+      border:1px solid var(--border-soft);
+      color:var(--text-muted);
+      min-width:165px;
+      text-align:right;
     }
-    .todo-section h3 {
-      margin: 0 0 4px;
+    .hero-pill strong { color:var(--text-main); }
+
+    .stats-row {
+      display:grid;
+      grid-template-columns:repeat(4,minmax(0,1fr));
+      gap:14px;
     }
-    .todo-section p {
-      margin: 0 0 10px;
-      font-size: 0.9rem;
-      color:#666;
+    .stat-card {
+      background:var(--bg-main);
+      border-radius:14px;
+      padding:12px 14px;
+      box-shadow:var(--shadow-card);
+      border:1px solid var(--border-soft);
     }
+    .stat-label {
+      font-size:0.8rem;
+      text-transform:uppercase;
+      letter-spacing:0.05em;
+      color:#a16207;
+      margin-bottom:4px;
+    }
+    .stat-value {
+      font-size:1.3rem;
+      font-weight:700;
+      margin-bottom:2px;
+    }
+    .stat-sub {
+      font-size:0.8rem;
+      color:var(--text-muted);
+    }
+
+    .panel {
+      background:var(--bg-main);
+      border-radius:16px;
+      box-shadow:var(--shadow-card);
+      border:1px solid var(--border-soft);
+      padding:14px 16px 16px;
+    }
+    .panel-header {
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:8px;
+    }
+    .panel-header h4 {
+      margin:0;
+      font-size:0.98rem;
+    }
+    .panel-header span {
+      font-size:0.78rem;
+      color:var(--text-muted);
+    }
+
+    #gradeTrendChart,
+    #attendanceRing {
+      width:100%;
+      max-height:230px;
+    }
+
     .todo-form {
       display:flex;
-      gap:10px;
+      gap:8px;
       margin-bottom:10px;
     }
     .todo-form input {
       flex:1;
       padding:8px 10px;
-      border-radius:8px;
-      border:1px solid #ccc;
-      font-size:0.9rem;
+      border-radius:999px;
+      border:1px solid #e5e7eb;
+      font-size:0.88rem;
+      background:#f9fafb;
     }
     .todo-form button {
       padding:8px 14px;
       border:none;
-      border-radius:8px;
-      background:#111;
+      border-radius:999px;
+      background:#111827;
       color:#fff;
       font-weight:600;
+      font-size:0.85rem;
       cursor:pointer;
-    }
-    .todo-form button:hover {
-      background:#333;
     }
     .todo-list {
       list-style:none;
       padding:0;
       margin:0;
+      font-size:0.88rem;
     }
     .todo-item {
       display:flex;
-      align-items:center;
       justify-content:space-between;
-      padding:6px 4px;
-      border-bottom:1px solid #f0f0f0;
-      font-size:0.9rem;
+      align-items:center;
+      padding:6px 2px;
+      border-bottom:1px solid #f3e5d7;
     }
     .todo-left {
       display:flex;
@@ -337,323 +669,474 @@ if ($stats['unread_notices'] > 0) {
       gap:8px;
     }
     .todo-item.completed span {
-      text-decoration: line-through;
-      color:#999;
+      text-decoration:line-through;
+      color:#9ca3af;
     }
     .todo-remove {
-      background:none;
       border:none;
-      color:#c62828;
+      background:none;
+      color:#b91c1c;
+      font-size:0.8rem;
       cursor:pointer;
-      font-size:0.85rem;
+    }
+
+    .notice-list {
+      list-style:none;
+      margin:0;
+      padding:0;
+      font-size:0.86rem;
+    }
+    .notice-item {
+      padding:6px 2px;
+      border-bottom:1px solid #f3e5d7;
+    }
+    .notice-title {
+      font-weight:600;
+    }
+    .notice-date {
+      font-size:0.78rem;
+      color:var(--text-muted);
+    }
+
+    .event-card {
+      padding:8px 10px;
+      border-radius:10px;
+      border:1px dashed #fed7aa;
+      background:#fff7ea;
+      margin-bottom:8px;
+      font-size:0.86rem;
+    }
+    .event-card h5 {
+      margin:0 0 2px;
+      font-size:0.9rem;
+      color:#92400e;
+    }
+    .event-meta {
+      color:var(--text-muted);
+      font-size:0.8rem;
+    }
+    .event-meta .time-left {
+      display:inline-block;
+      margin-top:2px;
+      font-weight:600;
+      color:#16a34a;
+    }
+
+    @media(max-width:1100px){
+      .app-shell{grid-template-columns:220px 1fr;}
+      .stats-row{grid-template-columns:repeat(2,minmax(0,1fr));}
+      .content-grid{grid-template-columns:1fr;}
+    }
+    @media(max-width:800px){
+      .app-shell{grid-template-columns:1fr;}
+      .sidebar{display:none;}
+      .main{padding:18px;}
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <!-- Sidebar -->
-    <aside class="sidebar">
+<div class="app-shell">
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div>
       <div class="logo">
-        <img src="../../assets/img/logo.png" alt="Logo" width="30" />
+        <img src="../../assets/img/logo.png" alt="EduSphere Logo" />
+        <span>EduSphere</span>
       </div>
-
       <nav class="nav">
-        <a href="dashboard.php" class="active"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
-        <a href="assignments.php"><i class="fas fa-book"></i> My Assignments</a>
-        <a href="results.php"><i class="fas fa-graduation-cap"></i> My Results</a>
-        <a href="fees.php"><i class="fas fa-file-invoice-dollar"></i> Fee Details</a>
+        <a href="dashboard.php" class="active"><i class="fas fa-th-large"></i> Dashboard</a>
+        <a href="assignments.php"><i class="fas fa-book"></i> Assignments</a>
+        <a href="results.php"><i class="fas fa-graduation-cap"></i> Results</a>
+        <a href="fees.php"><i class="fas fa-file-invoice-dollar"></i> Fees</a>
         <a href="events.php"><i class="fas fa-calendar-alt"></i> Events</a>
         <a href="/edusphere/auth/logout.php" class="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
       </nav>
-
-      <div class="profile">
-        <img src="../../assets/img/user.jpg" alt="Student" />
+    </div>
+    <div class="sidebar-student-card">
+      <img src="<?= htmlspecialchars($student_avatar) ?>" alt="Student" />
+      <div>
         <div class="name"><?= htmlspecialchars($student_name) ?></div>
-        <div class="email"><?= htmlspecialchars($student_email) ?></div>
-
-        <div class="profile-actions">
-          <div class="dropdown">
-            <i class="fas fa-cog" id="settingsToggle" tabindex="0" role="button" aria-haspopup="true" aria-expanded="false"></i>
-            <div class="settings-dropdown" id="settingsMenu" role="menu" aria-hidden="true">
-              <label>
-                <input type="checkbox" id="darkModeToggle" />
-                Dark Mode
-              </label>
-              <label>
-                Language:
-                <select id="languageSelect" aria-label="Select Language">
-                  <option value="en">English</option>
-                  <option value="np">Nepali</option>
-                </select>
-              </label>
-            </div>
-          </div>
-          <a href="../../auth/logout.php" class="logout-icon" aria-label="Logout"><i class="fas fa-sign-out-alt"></i></a>
-        </div>
+        <div class="role">Student · EduSphere</div>
       </div>
-    </aside>
+    </div>
+  </aside>
 
-    <!-- Main Content -->
-    <main class="main">
-      <header class="header">
-        <div>
-          <h2>Student Dashboard</h2>
-          <p>Welcome, <?= htmlspecialchars($student_name) ?>!</p>
+  <!-- MAIN -->
+  <main class="main">
+    <div class="main-inner">
+      <div class="main-header">
+        <div class="main-header-left">
+          <h2>My Student Hub</h2>
+          <p>Good to see you, <?= htmlspecialchars($student_name) ?> 👋</p>
         </div>
-        <div class="actions">
-          <div class="notification">
-            <i class="fas fa-bell" id="notificationBell" tabindex="0" role="button" aria-haspopup="true" aria-expanded="false"></i>
-            <?php if ($notificationCount > 0): ?>
-              <span class="notification-dot"></span>
-            <?php endif; ?>
-            <div class="notification-dropdown" id="notificationDropdown" role="menu" aria-hidden="true">
-              <p><strong>Notifications</strong></p>
-              <ul>
-                <?php if ($notificationCount === 0): ?>
-                  <li class="empty">No new notifications.</li>
-                <?php else: ?>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div class="notif-wrapper">
+            <button class="icon-btn" id="notifToggle" type="button" aria-label="Notifications">
+              <i class="fas fa-bell"></i>
+              <?php if ($notificationCount > 0): ?>
+                <span class="badge"><?= $notificationCount ?></span>
+              <?php endif; ?>
+            </button>
+            <div class="notif-dropdown" id="notifDropdown">
+              <h4>Notifications</h4>
+              <?php if ($notificationCount === 0): ?>
+                <div style="padding:8px 4px;font-size:0.84rem;color:#9ca3af;">
+                  You're all caught up. No new alerts.
+                </div>
+              <?php else: ?>
+                <ul>
                   <?php foreach ($notifications as $n): ?>
+                    <?php
+                      $tagClass = 'notif-notice';
+                      if ($n['type'] === 'assignment') $tagClass = 'notif-assign';
+                      elseif ($n['type'] === 'warning') $tagClass = 'notif-warning';
+                      elseif ($n['type'] === 'fee') $tagClass = 'notif-fee';
+                      elseif ($n['type'] === 'attendance') $tagClass = 'notif-attend';
+                    ?>
                     <li>
-                      <?php
-                        $tagClass = 'notif-notice';
-                        if ($n['type'] === 'assignment') $tagClass = 'notif-assign';
-                        elseif ($n['type'] === 'fee')   $tagClass = 'notif-fee';
-                        elseif ($n['type'] === 'event') $tagClass = 'notif-event';
-                        elseif ($n['type'] === 'result')$tagClass = 'notif-result';
-                      ?>
-                      <span class="notif-tag <?= $tagClass ?>">
-                        <?= strtoupper($n['type']) ?>
-                      </span>
+                      <span class="notif-tag <?= $tagClass ?>"><?= strtoupper(htmlspecialchars($n['type'])) ?></span>
                       <?= htmlspecialchars($n['text']) ?>
                     </li>
                   <?php endforeach; ?>
-                <?php endif; ?>
-              </ul>
+                </ul>
+              <?php endif; ?>
+            </div>
+          </div>
+
+          <div class="header-avatar">
+            <img src="<?= htmlspecialchars($student_avatar) ?>" alt="Student" />
+            <div>
+              <div class="name"><?= htmlspecialchars($student_name) ?></div>
+              <div class="role">Class <?= htmlspecialchars($student_class ?? '—') ?></div>
             </div>
           </div>
         </div>
-      </header>
+      </div>
 
-      <!-- Top Stat Cards -->
-      <section class="cards">
-        <div class="card stat-card">
-          <h3>Upcoming Assignments</h3>
-          <div class="big-number"><?= $stats['upcoming_assignments'] ?></div>
-          <div class="sub-text">Due in the next 7 days</div>
-        </div>
-
-        <div class="card stat-card">
-          <h3>Result Summary</h3>
-          <?php if ($stats['avg_score'] !== null): ?>
-            <div class="big-number"><?= $stats['avg_score'] ?></div>
-            <div class="sub-text">Average score from <?= $stats['total_results'] ?> record<?= $stats['total_results'] == 1 ? '' : 's' ?></div>
-          <?php else: ?>
-            <div class="big-number">—</div>
-            <div class="sub-text">No results recorded yet</div>
-          <?php endif; ?>
-        </div>
-
-        <div class="card stat-card">
-          <h3>Fee Status</h3>
-          <div class="big-number">
-              <?= $stats['fee_status'] === 'Paid'
-                    ? 'Paid (Rs ' . number_format($stats['total_fee_paid'], 2) . ')'
-                    : 'Pending' ?>
-          </div>
-          <div class="sub-text">
-              <?= $stats['fee_status'] === 'Paid'
-                    ? 'Thank you for your payment'
-                    : 'No payment recorded yet' ?>
-          </div>
-        </div>
-
-        <div class="card stat-card">
-          <h3>Notices</h3>
-          <div class="big-number"><?= $stats['unread_notices'] ?></div>
-          <div class="sub-text">Unread notices</div>
-        </div>
-      </section>
-
-      <!-- To-Do List -->
-      <section class="todo-section">
-        <h3><i class="fa-solid fa-list-check"></i> To-Do List</h3>
-        <p>Track what you need to do today. You can add your own tasks and mark them as done.</p>
-
-        <form class="todo-form" id="todoForm">
-          <input type="text" id="todoInput" placeholder="Add a new task (e.g., Finish science assignment)" />
-          <button type="submit">Add</button>
-        </form>
-
-        <ul class="todo-list" id="todoList"></ul>
-      </section>
-
-      <!-- Recommended Events Section -->
-      <section class="events-section">
-        <h3><i class="fa-solid fa-calendar-check"></i> Recommended Events For You</h3>
-
-        <?php if (empty($recommendedEvents)): ?>
-          <p>No recommended events right now. Once you participate in some events, similar ones will appear here.</p>
-        <?php else: ?>
-          <?php foreach ($recommendedEvents as $ev): ?>
-            <div class="event-card">
-              <h4><?= htmlspecialchars($ev['title']) ?></h4>
-              <div class="event-meta">
-                <?= htmlspecialchars($ev['category_name'] ?? 'Event') ?>
-                |
-                <?= htmlspecialchars($ev['event_date']) ?>
-                <?php if (!empty($ev['start_time'])): ?>
-                  at <?= htmlspecialchars(substr($ev['start_time'], 0, 5)) ?>
-                <?php endif; ?>
-                <br>
-                <?= htmlspecialchars($ev['location'] ?? '') ?>
-                <?php if (!empty($ev['time_left_label'])): ?>
-                  <br><span class="time-left"><?= htmlspecialchars($ev['time_left_label']) ?></span>
-                <?php endif; ?>
+      <!-- CONTENT GRID -->
+      <div class="content-grid">
+        <!-- LEFT COLUMN -->
+        <section class="left-column">
+          <!-- HERO -->
+          <div class="hero-card">
+            <div class="hero-left">
+              <h3>Today’s Study Overview</h3>
+              <p>Your assignments, results and notices in one place.</p>
+              <div class="hero-metric">
+                <span class="big"><?= $stats['upcoming_assignments'] ?></span>
+                <span>assignment(s) due this week</span>
+              </div>
+              <button class="hero-btn" onclick="window.location.href='assignments.php'">
+                View My Assignments
+              </button>
+            </div>
+            <div class="hero-right">
+              <div class="hero-pill">
+                Avg score:
+                <strong><?= $stats['avg_score'] !== null ? $stats['avg_score'] : '—' ?></strong><br/>
+                Attendance:
+                <strong><?= $stats['attendance_percent'] !== null ? $stats['attendance_percent'].'%' : '—' ?></strong><br/>
+                Unread notices:
+                <strong><?= $stats['unread_notices'] ?></strong>
               </div>
             </div>
-          <?php endforeach; ?>
-        <?php endif; ?>
-      </section>
-    </main>
-  </div>
+          </div>
 
-  <script>
-    // ---------- Notifications ----------
-    const bell = document.getElementById('notificationBell');
-    const dropdown = document.getElementById('notificationDropdown');
-    bell.addEventListener('click', () => {
-      dropdown.classList.toggle('show');
-      const expanded = bell.getAttribute('aria-expanded') === 'true';
-      bell.setAttribute('aria-expanded', !expanded);
-      dropdown.setAttribute('aria-hidden', expanded);
-    });
-    document.addEventListener('click', (e) => {
-      if (!bell.contains(e.target) && !dropdown.contains(e.target)) {
-        dropdown.classList.remove('show');
-        bell.setAttribute('aria-expanded', 'false');
-        dropdown.setAttribute('aria-hidden', 'true');
-      }
-    });
+          <!-- STATS -->
+          <div class="stats-row">
+            <div class="stat-card">
+              <div class="stat-label">Assignments</div>
+              <div class="stat-value"><?= $stats['upcoming_assignments'] ?></div>
+              <div class="stat-sub">Due in next 7 days</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Overdue</div>
+              <div class="stat-value"><?= $stats['overdue_assignments'] ?></div>
+              <div class="stat-sub">Need your attention</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Results</div>
+              <div class="stat-value">
+                <?= $stats['avg_score'] !== null ? $stats['avg_score'] : '—' ?>
+              </div>
+              <div class="stat-sub">
+                Avg from <?= $stats['total_results'] ?> record<?= $stats['total_results'] == 1 ? '' : 's' ?>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Attendance</div>
+              <div class="stat-value">
+                <?= $stats['attendance_percent'] !== null ? $stats['attendance_percent'].'%' : '—' ?>
+              </div>
+              <div class="stat-sub">
+                <?= $stats['attendance_total'] ?> day<?= $stats['attendance_total'] == 1 ? '' : 's' ?> tracked
+              </div>
+            </div>
+          </div>
 
-    // ---------- Settings / Dark mode ----------
-    const settingsToggle = document.getElementById('settingsToggle');
-    const settingsMenu   = document.getElementById('settingsMenu');
-    settingsToggle.addEventListener('click', () => {
-      settingsMenu.classList.toggle('show');
-      const expanded = settingsToggle.getAttribute('aria-expanded') === 'true';
-      settingsToggle.setAttribute('aria-expanded', !expanded);
-      settingsMenu.setAttribute('aria-hidden', expanded);
-    });
-    document.addEventListener('click', (e) => {
-      if (!settingsToggle.contains(e.target) && !settingsMenu.contains(e.target)) {
-        settingsMenu.classList.remove('show');
-        settingsToggle.setAttribute('aria-expanded', 'false');
-        settingsMenu.setAttribute('aria-hidden', 'true');
-      }
-    });
+          <!-- GRADE TREND + ATTENDANCE RING -->
+          <div class="panel">
+            <div class="panel-header">
+              <h4>Progress Snapshot</h4>
+              <span>Your recent scores and attendance</span>
+            </div>
+            <div style="display:grid;grid-template-columns:2fr 1.2fr;gap:12px;align-items:center;">
+              <div>
+                <canvas id="gradeTrendChart"></canvas>
+              </div>
+              <div>
+                <canvas id="attendanceRing"></canvas>
+              </div>
+            </div>
+          </div>
 
-    const darkToggle = document.getElementById('darkModeToggle');
-    if (localStorage.getItem('darkMode') === 'enabled') {
-      document.body.classList.add('dark-mode');
-      darkToggle.checked = true;
+          <!-- TO-DO -->
+          <div class="panel">
+            <div class="panel-header">
+              <h4><i class="fa-solid fa-list-check"></i> To-Do List</h4>
+              <span>Plan your day & tick things off.</span>
+            </div>
+            <form class="todo-form" id="todoForm">
+              <input type="text" id="todoInput" placeholder="Add a new task (e.g., Revise maths chapter 3)" />
+              <button type="submit">Add</button>
+            </form>
+            <ul class="todo-list" id="todoList"></ul>
+          </div>
+        </section>
+
+        <!-- RIGHT COLUMN -->
+        <aside class="right-column">
+          <!-- NOTICES -->
+          <div class="panel">
+            <div class="panel-header">
+              <h4>Latest Notices</h4>
+              <span><?= $stats['unread_notices'] ?> unread</span>
+            </div>
+            <?php if (empty($recentNotices)): ?>
+              <p style="font-size:0.86rem;color:var(--text-muted);margin:0;">
+                No new notices. Check back later.
+              </p>
+            <?php else: ?>
+              <ul class="notice-list">
+                <?php foreach ($recentNotices as $n): ?>
+                  <li class="notice-item">
+                    <div class="notice-title"><?= htmlspecialchars($n['title']) ?></div>
+                    <div class="notice-date">
+                      <?= htmlspecialchars(date('M j, Y', strtotime($n['created_at'] ?? 'now'))) ?>
+                    </div>
+                  </li>
+                <?php endforeach; ?>
+              </ul>
+            <?php endif; ?>
+          </div>
+
+          <!-- RECOMMENDED EVENTS -->
+          <div class="panel">
+            <div class="panel-header">
+              <h4><i class="fa-solid fa-calendar-check"></i> Recommended Events</h4>
+              <span>Picked for your class & interests</span>
+            </div>
+            <?php if (empty($recommendedEvents)): ?>
+              <p style="font-size:0.86rem;color:var(--text-muted);margin:0;">
+                No recommended events right now. Once you join a few events, similar ones will show here.
+              </p>
+            <?php else: ?>
+              <?php foreach ($recommendedEvents as $ev): ?>
+                <div class="event-card">
+                  <h5><?= htmlspecialchars($ev['title']) ?></h5>
+                  <div class="event-meta">
+                    <?= htmlspecialchars($ev['category_name'] ?? 'Event') ?>
+                    · <?= htmlspecialchars($ev['event_date']) ?>
+                    <?php if (!empty($ev['start_time'])): ?>
+                      at <?= htmlspecialchars(substr($ev['start_time'],0,5)) ?>
+                    <?php endif; ?>
+                    <?php if (!empty($ev['location'])): ?>
+                      <br><?= htmlspecialchars($ev['location']) ?>
+                    <?php endif; ?>
+                    <?php if (!empty($ev['time_left_label']) && $ev['time_left_label'] !== 'Already happened'): ?>
+                      <br><span class="time-left"><?= htmlspecialchars($ev['time_left_label']) ?></span>
+                    <?php endif; ?>
+                  </div>
+                </div>
+              <?php endforeach; ?>
+            <?php endif; ?>
+          </div>
+
+          <!-- QUICK TIPS -->
+          <div class="panel">
+            <div class="panel-header">
+              <h4>Study Tips</h4>
+            </div>
+            <ul style="margin:0;padding-left:16px;font-size:0.86rem;color:var(--text-muted);">
+              <li>Use this dashboard every morning to see what needs attention.</li>
+              <li>Complete shorter tasks first to build momentum.</li>
+              <li>Review your latest results after every exam and set a small improvement goal.</li>
+              <li>Maintain 90%+ attendance to avoid backlogs and surprises in exams.</li>
+            </ul>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+  // Notification dropdown
+  (function() {
+    const toggle   = document.getElementById('notifToggle');
+    const dropdown = document.getElementById('notifDropdown');
+    if (!toggle || !dropdown) return;
+
+    toggle.addEventListener('click', function(e) {
+      e.stopPropagation();
+      dropdown.classList.toggle('active');
+    });
+    document.addEventListener('click', () => dropdown.classList.remove('active'));
+    dropdown.addEventListener('click', e => e.stopPropagation());
+  })();
+
+  // To-Do list (localStorage per student)
+  const studentId   = <?= json_encode($student_id) ?>;
+  const storageKey  = 'student_todos_' + studentId;
+  const initialTodos = <?= json_encode($initialTodos, JSON_HEX_TAG|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_HEX_AMP) ?>;
+  const todoForm   = document.getElementById('todoForm');
+  const todoInput  = document.getElementById('todoInput');
+  const todoListEl = document.getElementById('todoList');
+  let todos = [];
+
+  function saveTodos() {
+    localStorage.setItem(storageKey, JSON.stringify(todos));
+  }
+  function renderTodos() {
+    todoListEl.innerHTML = '';
+    if (todos.length === 0) {
+      const li = document.createElement('li');
+      li.textContent = 'No tasks yet. Add one above.';
+      li.style.fontSize = '0.88rem';
+      li.style.color = '#9ca3af';
+      todoListEl.appendChild(li);
+      return;
     }
-    darkToggle.addEventListener('change', () => {
-      document.body.classList.toggle('dark-mode');
-      if (document.body.classList.contains('dark-mode')) {
-        localStorage.setItem('darkMode', 'enabled');
-      } else {
-        localStorage.setItem('darkMode', 'disabled');
-      }
-    });
+    todos.forEach((t, idx) => {
+      const li = document.createElement('li');
+      li.className = 'todo-item' + (t.done ? ' completed' : '');
+      const left = document.createElement('div');
+      left.className = 'todo-left';
 
-    // ---------- To-do list (localStorage per student) ----------
-    const studentId     = <?= json_encode($student_id) ?>;
-    const storageKey    = 'student_todos_' + studentId;
-    const initialTodos  = <?= json_encode($initialTodos, JSON_HEX_TAG|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_HEX_AMP) ?>;
-    const todoForm      = document.getElementById('todoForm');
-    const todoInput     = document.getElementById('todoInput');
-    const todoListEl    = document.getElementById('todoList');
-
-    let todos = [];
-
-    function saveTodos() {
-      localStorage.setItem(storageKey, JSON.stringify(todos));
-    }
-
-    function renderTodos() {
-      todoListEl.innerHTML = '';
-      if (todos.length === 0) {
-        const li = document.createElement('li');
-        li.textContent = 'No tasks yet. Add one above.';
-        li.style.fontSize = '0.9rem';
-        li.style.color = '#777';
-        todoListEl.appendChild(li);
-        return;
-      }
-
-      todos.forEach((t, idx) => {
-        const li = document.createElement('li');
-        li.className = 'todo-item' + (t.done ? ' completed' : '');
-        const left = document.createElement('div');
-        left.className = 'todo-left';
-
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.checked = t.done;
-        cb.addEventListener('change', () => {
-          todos[idx].done = cb.checked;
-          saveTodos();
-          renderTodos();
-        });
-
-        const span = document.createElement('span');
-        span.textContent = t.text;
-
-        left.appendChild(cb);
-        left.appendChild(span);
-
-        const removeBtn = document.createElement('button');
-        removeBtn.className = 'todo-remove';
-        removeBtn.textContent = 'Remove';
-        removeBtn.addEventListener('click', () => {
-          todos.splice(idx, 1);
-          saveTodos();
-          renderTodos();
-        });
-
-        li.appendChild(left);
-        li.appendChild(removeBtn);
-        todoListEl.appendChild(li);
-      });
-    }
-
-    function loadTodos() {
-      const stored = localStorage.getItem(storageKey);
-      if (stored) {
-        try {
-          todos = JSON.parse(stored) || [];
-        } catch (e) {
-          todos = [];
-        }
-      } else {
-        // First time: seed with initial suggestions from PHP
-        todos = initialTodos.map(text => ({ text, done: false }));
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = t.done;
+      cb.addEventListener('change', () => {
+        todos[idx].done = cb.checked;
         saveTodos();
-      }
-      renderTodos();
-    }
+        renderTodos();
+      });
 
-    todoForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const text = todoInput.value.trim();
-      if (!text) return;
-      todos.push({ text, done: false });
-      todoInput.value = '';
-      saveTodos();
-      renderTodos();
+      const span = document.createElement('span');
+      span.textContent = t.text;
+
+      left.appendChild(cb);
+      left.appendChild(span);
+
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'todo-remove';
+      removeBtn.textContent = 'Remove';
+      removeBtn.addEventListener('click', () => {
+        todos.splice(idx, 1);
+        saveTodos();
+        renderTodos();
+      });
+
+      li.appendChild(left);
+      li.appendChild(removeBtn);
+      todoListEl.appendChild(li);
     });
+  }
+  function loadTodos() {
+    const stored = localStorage.getItem(storageKey);
+    if (stored) {
+      try { todos = JSON.parse(stored) || []; } catch(e) { todos = []; }
+    } else {
+      todos = (initialTodos || []).map(text => ({ text, done:false }));
+      saveTodos();
+    }
+    renderTodos();
+  }
+  todoForm.addEventListener('submit', e => {
+    e.preventDefault();
+    const text = todoInput.value.trim();
+    if (!text) return;
+    todos.push({ text, done:false });
+    todoInput.value = '';
+    saveTodos();
+    renderTodos();
+  });
+  loadTodos();
 
-    loadTodos();
-  </script>
+  // Grade trend chart
+  (function() {
+    const data = <?= json_encode($gradeTrend, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) ?>;
+    if (!data || !data.length) return;
+    const ctx = document.getElementById('gradeTrendChart');
+    if (!ctx) return;
+
+    const labels = data.map(r => r.d);
+    const values = data.map(r => parseFloat(r.score));
+
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Score',
+          data: values,
+          tension: 0.3,
+          borderWidth: 2,
+          pointRadius: 3
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: {
+            beginAtZero: true,
+            max: 100
+          }
+        }
+      }
+    });
+  })();
+
+  // Attendance ring (doughnut)
+  (function() {
+    const percent = <?= $stats['attendance_percent'] !== null ? (float)$stats['attendance_percent'] : 'null' ?>;
+    const canvas = document.getElementById('attendanceRing');
+    if (percent === null || !canvas) return;
+
+    new Chart(canvas, {
+      type: 'doughnut',
+      data: {
+        labels: ['Present', 'Absent'],
+        datasets: [{
+          data: [percent, 100 - percent],
+          borderWidth: 0
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => ctx.parsed + '%'
+            }
+          }
+        },
+        cutout: '70%'
+      }
+    });
+  })();
+</script>
 </body>
 </html>

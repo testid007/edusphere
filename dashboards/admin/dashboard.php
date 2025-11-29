@@ -1,368 +1,355 @@
 <?php
 session_start();
 
-// Only admin
-if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'admin') {
+// Only admin access
+$role = $_SESSION['user_role'] ?? ($_SESSION['role'] ?? '');
+if (!isset($_SESSION['user_id']) || $role !== 'admin') {
     header('Location: ../../auth/login.php');
     exit;
 }
 
 require_once '../../includes/db.php';
 
-$admin_name = $_SESSION['admin_name'] ?? 'Admin';
+$admin_id     = (int)($_SESSION['user_id'] ?? 0);
+$admin_name   = $_SESSION['admin_name']  ?? 'Main';
+$admin_email  = $_SESSION['admin_email'] ?? 'admin@example.com';
+$admin_avatar = '../../assets/img/user.jpg';
 
-/* -------------------- User counts for cards -------------------- */
-$totalUsers    = 0;
-$totalStudents = 0;
-$totalTeachers = 0;
-$totalParents  = 0;
-
-try {
-    $stmt = $conn->query("SELECT role, COUNT(*) AS c FROM users GROUP BY role");
-    $roleCounts = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    foreach ($roleCounts as $row) {
-        $role  = strtolower($row['role']);
-        $count = (int)$row['c'];
-
-        $totalUsers += $count;
-
-        if ($role === 'student') {
-            $totalStudents = $count;
-        } elseif ($role === 'teacher') {
-            $totalTeachers = $count;
-        } elseif ($role === 'parent') {
-            $totalParents = $count;
-        }
-    }
-} catch (Exception $e) {
-    // On error: keep zeros
-}
-
-/* -------------------- Upcoming events (card + notifications) -------------------- */
-$upcomingEventList  = [];   // for card
-$upcomingEventCount = 0;
-$notifications      = [];
-$hasNewStuff        = false;
+/* -------------------- Header notifications (bell) -------------------- */
+$notifications = [];
+$notifCount    = 0;
 
 try {
-    // Get next 5 upcoming events (from today onwards)
-    $stmt = $conn->prepare("
-        SELECT id, title, event_date
+    // Upcoming events in next 7 days
+    $stmt = $conn->query("
+        SELECT title, event_date
         FROM events
         WHERE event_date >= CURDATE()
+          AND event_date <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
         ORDER BY event_date ASC
         LIMIT 5
     ");
-    $stmt->execute();
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    $today = new DateTime('today');
-
-    foreach ($rows as $row) {
-        $eventDate = new DateTime($row['event_date']);
-        $interval  = $today->diff($eventDate);
-        $daysDiff  = (int)$interval->format('%r%a'); // signed days (>= 0 here)
-
-        // Human readable time left
-        if ($daysDiff === 0) {
-            $timeLeft = 'today';
-        } elseif ($daysDiff === 1) {
-            $timeLeft = 'tomorrow';
-        } else {
-            $timeLeft = "in {$daysDiff} days";
-        }
-
-        $formattedDate = $eventDate->format('M d, Y');
-
-        $upcomingEventList[] = [
-            'title'          => $row['title'],
-            'formatted_date' => $formattedDate,
-            'time_left'      => $timeLeft,
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $notifications[] = [
+            'type'    => 'info',
+            'icon'    => 'fa-calendar-day',
+            'message' => 'Upcoming: \"' . $row['title'] . '\" on ' .
+                         date('M j', strtotime($row['event_date'])),
+            'time'    => 'Within 7 days',
         ];
-
-        // Notifications: separate message if it's tomorrow
-        if ($daysDiff === 1) {
-            $notifications[] = "Reminder: \"{$row['title']}\" is tomorrow ({$formattedDate}).";
-        } else {
-            $notifications[] = "Upcoming event: \"{$row['title']}\" on {$formattedDate} ({$timeLeft}).";
-        }
     }
 
-    $upcomingEventCount = count($upcomingEventList);
-
-    // New registrations in last 3 days
-    $stmt = $conn->prepare("
-        SELECT COUNT(*) AS c
-        FROM users
-        WHERE created_at >= DATE_SUB(NOW(), INTERVAL 3 DAY)
+    // New user registrations in last 3 days
+    $stmt = $conn->query("
+        SELECT COUNT(*) FROM users
+        WHERE created_at IS NOT NULL
+          AND created_at >= DATE_SUB(NOW(), INTERVAL 3 DAY)
     ");
-    $stmt->execute();
-    $newRegs = (int)$stmt->fetchColumn();
-
-    if ($newRegs > 0) {
-        $notifications[] = "{$newRegs} new user(s) registered in the last 3 days.";
+    $newUsers = (int)$stmt->fetchColumn();
+    if ($newUsers > 0) {
+        $notifications[] = [
+            'type'    => 'success',
+            'icon'    => 'fa-user-plus',
+            'message' => "$newUsers new user account(s) created in the last 3 days.",
+            'time'    => 'Recent',
+        ];
     }
-
-    $hasNewStuff = count($notifications) > 0;
 } catch (Exception $e) {
-    // Optionally log / ignore
+    // silent fail
 }
+
+$notifCount = count($notifications);
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Admin Dashboard</title>
+  <title>Admin Dashboard | EduSphere</title>
 
   <link rel="stylesheet" href="../../assets/css/dashboard.css" />
   <link rel="stylesheet"
         href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
 
-  <!-- Chart.js for reports page -->
+  <!-- Chart.js for dashboard & reports -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
   <div class="container">
-    <!-- Sidebar -->
+    <!-- ========== SIDEBAR ========== -->
     <aside class="sidebar">
-      <div class="logo">
-        <img src="../../assets/img/logo.png" alt="Logo" />
-      </div>
+      <div>
+        <div class="logo">
+          <img src="../../assets/img/logo.png" alt="EduSphere Logo" />
+          <span>EduSphere</span>
+        </div>
 
-      <nav class="nav">
-        <!-- Dashboard is the main page now (no AJAX) -->
-        <a href="dashboard.php" class="nav-link active">
-          <i class="fas fa-tachometer-alt"></i> Dashboard
-        </a>
+        <nav class="nav">
+          <a href="#" class="nav-link" data-page="dashboard-content">
+            <i class="fas fa-home"></i> Overview
+          </a>
 
-        <a href="#" class="nav-link" data-page="manage-users">
-          <i class="fas fa-users-cog"></i> Manage Users
-        </a>
-        <a href="#" class="nav-link" data-page="create-fee">
-          <i class="fas fa-file-invoice-dollar"></i> Create Fee
-        </a>
-        <a href="#" class="nav-link" data-page="reports">
-          <i class="fas fa-chart-bar"></i> View Reports
-        </a>
-        <a href="#" class="nav-link" data-page="manage-schedule">
-          <i class="fas fa-calendar-alt"></i> Manage Schedule
-        </a>
-        <a href="#" class="nav-link" data-page="schedule-view">
-          <i class="fas fa-eye"></i> Schedule View
-        </a>
+          <a href="#" class="nav-link" data-page="manage-users">
+            <i class="fas fa-users-cog"></i> Manage Users
+          </a>
 
-        <!-- Manage Events is full page, not AJAX -->
-        <a href="manage-events.php" class="nav-link">
-          <i class="fa-solid fa-calendar-plus"></i> Manage Events
-        </a>
+          <a href="#" class="nav-link" data-page="create-fee">
+            <i class="fas fa-file-invoice-dollar"></i> Create Fee
+          </a>
 
-        <a href="../../auth/logout.php">
-          <i class="fas fa-sign-out-alt"></i> Logout
-        </a>
-      </nav>
+          <a href="fees.php" class="nav-link">
+            <i class="fas fa-file-invoice-dollar"></i> Fees & Payments
+          </a>
 
-      <!-- Admin Profile -->
-      <div class="profile">
-        <img src="../../assets/img/user.jpg" alt="Admin">
-        <div class="name"><?php echo htmlspecialchars($admin_name); ?></div>
-        <div class="profile-actions">
-          <div class="dropdown" style="position: relative;">
-            <i class="fas fa-cog" id="settingsToggle"></i>
-            <div class="settings-dropdown" id="settingsMenu">
-              <label>
-                <input type="checkbox" id="darkModeToggle"> Dark Mode
-              </label>
-              <label>
-                Language:
-                <select id="languageSelect">
-                  <option value="en">English</option>
-                  <option value="np">Nepali</option>
-                </select>
-              </label>
-            </div>
+          <!-- FIX HERE: make View Reports a normal link, no data-page -->
+          <a href="reports.php" class="nav-link">
+            <i class="fas fa-chart-bar"></i> View Reports
+          </a>
+          <!-- END FIX -->
+
+          <a href="#" class="nav-link" data-page="manage-schedule">
+            <i class="fas fa-calendar-alt"></i> Manage Schedule
+          </a>
+
+          <a href="#" class="nav-link" data-page="schedule-view">
+            <i class="fas fa-eye"></i> Schedule View
+          </a>
+
+          <a href="manage-events.php" class="nav-link">
+            <i class="fas fa-calendar-plus"></i> Manage Events
+          </a>
+
+          <a href="../../auth/logout.php" class="nav-link logout">
+            <i class="fas fa-sign-out-alt"></i> Logout
+          </a>
+        </nav>
+
+        <div class="sidebar-teacher-card">
+          <img src="<?php echo htmlspecialchars($admin_avatar); ?>" alt="Admin" />
+          <div>
+            <div class="name"><?php echo htmlspecialchars($admin_name); ?></div>
+            <div class="role">Administrator · EduSphere</div>
           </div>
         </div>
       </div>
     </aside>
 
-    <!-- Main Area -->
+    <!-- ========== MAIN SHELL ========== -->
     <main class="main">
-      <header class="header">
-        <div>
+      <div class="main-header">
+        <div class="main-header-left">
           <h2>Admin Dashboard</h2>
-          <p>Welcome, <?php echo htmlspecialchars($admin_name); ?>!</p>
+          <p>Welcome, <?php echo htmlspecialchars($admin_name); ?> 👋</p>
         </div>
-        <div class="actions">
-          <button class="notification" type="button">
-            <i class="fas fa-bell" id="notificationBell"></i>
-            <?php if ($hasNewStuff): ?>
-              <span class="notification-dot"></span>
-            <?php endif; ?>
-            <div class="notification-dropdown" id="notificationDropdown">
-              <p><strong>Notifications</strong></p>
-              <ul>
-                <?php if (!empty($notifications)): ?>
-                  <?php foreach ($notifications as $note): ?>
-                    <li class="unread"><?php echo htmlspecialchars($note); ?></li>
-                  <?php endforeach; ?>
-                <?php else: ?>
-                  <li class="empty">No new notifications.</li>
-                <?php endif; ?>
-              </ul>
-            </div>
-          </button>
-        </div>
-      </header>
 
-      <!-- MAIN DASHBOARD CONTENT (cards) -->
-      <section class="content" id="dashboardContent">
-        <div class="cards">
-          <!-- Total Users -->
-          <div class="card">
-            <div>
-              <h3>Total Users</h3>
-              <p><?php echo number_format($totalUsers); ?></p>
-            </div>
+        <div class="main-header-right">
+          <div class="search-box">
+            <i class="fas fa-search"></i>
+            <input type="text"
+                   id="adminSearchInput"
+                   placeholder="Search users, classes or events..." />
           </div>
 
-          <!-- Total Students -->
-          <div class="card">
-            <div>
-              <h3>Total Students</h3>
-              <p><?php echo number_format($totalStudents); ?></p>
-            </div>
-          </div>
-
-          <!-- Total Teachers -->
-          <div class="card">
-            <div>
-              <h3>Total Teachers</h3>
-              <p><?php echo number_format($totalTeachers); ?></p>
-            </div>
-          </div>
-
-          <!-- Total Parents -->
-          <div class="card">
-            <div>
-              <h3>Total Parents</h3>
-              <p><?php echo number_format($totalParents); ?></p>
-            </div>
-          </div>
-
-          <!-- Upcoming Events card -->
-          <div class="card">
-            <div>
-              <h3>Upcoming Events</h3>
-              <p><?php echo number_format($upcomingEventCount); ?></p>
-
-              <?php if ($upcomingEventCount > 0): ?>
-                <ul style="margin-top:8px; padding-left:18px; font-size:0.9rem;">
-                  <?php foreach (array_slice($upcomingEventList, 0, 3) as $ev): ?>
-                    <li>
-                      <strong><?php echo htmlspecialchars($ev['title']); ?></strong><br>
-                      <span>
-                        <?php echo htmlspecialchars($ev['formatted_date']); ?>
-                        &nbsp;–&nbsp;
-                        <?php echo htmlspecialchars($ev['time_left']); ?>
-                      </span>
+          <div class="notif-wrapper">
+            <button class="icon-btn" id="notifToggle" type="button">
+              <i class="fas fa-bell"></i>
+              <?php if ($notifCount > 0): ?>
+                <span class="badge"><?php echo $notifCount; ?></span>
+              <?php endif; ?>
+            </button>
+            <div class="notif-dropdown" id="notifDropdown">
+              <h4>Notifications</h4>
+              <?php if ($notifCount === 0): ?>
+                <div class="notif-empty">
+                  You’re all caught up. No new alerts.
+                </div>
+              <?php else: ?>
+                <ul class="notif-list">
+                  <?php foreach ($notifications as $n): ?>
+                    <?php $class = 'notif-' . $n['type']; ?>
+                    <li class="<?php echo $class; ?>">
+                      <div class="icon">
+                        <i class="fas <?php echo htmlspecialchars($n['icon']); ?>"></i>
+                      </div>
+                      <div class="notif-text">
+                        <p class="msg"><?php echo htmlspecialchars($n['message']); ?></p>
+                        <span class="time"><?php echo htmlspecialchars($n['time']); ?></span>
+                      </div>
                     </li>
                   <?php endforeach; ?>
                 </ul>
-              <?php else: ?>
-                <p style="font-size:0.9rem; margin-top:6px;">No upcoming events.</p>
               <?php endif; ?>
             </div>
           </div>
-        </div>
 
-        <!-- When you click other nav items, their pages will load here via AJAX -->
+          <div class="profile-wrapper">
+            <button class="header-avatar" id="profileToggle" type="button">
+              <img src="<?php echo htmlspecialchars($admin_avatar); ?>" alt="Admin" />
+              <div>
+                <div class="name"><?php echo htmlspecialchars($admin_name); ?></div>
+                <div class="role">Administrator</div>
+              </div>
+              <i class="fas fa-chevron-down"
+                 style="font-size:0.7rem;margin-left:4px;"></i>
+            </button>
+
+            <div class="profile-dropdown" id="profileDropdown">
+              <div class="profile-summary">
+                <img src="<?php echo htmlspecialchars($admin_avatar); ?>" alt="Admin" />
+                <div>
+                  <div class="name"><?php echo htmlspecialchars($admin_name); ?></div>
+                  <div class="email"><?php echo htmlspecialchars($admin_email); ?></div>
+                </div>
+              </div>
+              <a href="profile.php"><i class="fas fa-user"></i> View / Edit Profile</a>
+              <a href="change-password.php"><i class="fas fa-key"></i> Change Password</a>
+              <a href="notification-settings.php"><i class="fas fa-bell"></i> Notification Settings</a>
+              <a href="../../auth/logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <section class="content" id="dashboardContent">
+        <!-- filled by loadPage('dashboard-content') -->
       </section>
     </main>
   </div>
 
-  <!-- JavaScript -->
-  <script>
-  const navLinks = document.querySelectorAll('.nav-link');
+<script>
+  const navLinks         = document.querySelectorAll('.nav-link[data-page]');
   const dashboardContent = document.getElementById('dashboardContent');
 
-  // -------- AJAX loader for inner pages --------
+  /* ================== AJAX loader ================== */
   function loadPage(page) {
-    // show a small loading text every time
+    if (!dashboardContent) return;
     dashboardContent.innerHTML = '<p>Loading...</p>';
 
-    fetch(`../../dashboards/admin/${page}.php`, { cache: 'no-cache' })
+    fetch(page + '.php', { cache: 'no-cache' })
       .then(response => {
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status} while loading ${page}.php`);
+          throw new Error('HTTP ' + response.status + ' while loading ' + page + '.php');
         }
         return response.text();
       })
       .then(html => {
         dashboardContent.innerHTML = html;
 
-        // Page-specific inits
+        if (page === 'dashboard-content') {
+          initAdminDashboardQuickButtons();
+          initAdminDashboardCharts();
+        }
+
         if (page === 'reports') {
-          renderCharts();
-        } else if (page === 'schedule-view') {
-          initScheduleView();   // ⬅️ new!
+          if (typeof renderReportsCharts === 'function') {
+            renderReportsCharts();
+          } else if (typeof renderCharts === 'function') {
+            renderCharts();
+          }
+        }
+
+        if (page === 'schedule-view' && typeof initScheduleView === 'function') {
+          initScheduleView();
         }
       })
       .catch(error => {
         console.error(error);
         dashboardContent.innerHTML =
-          `<p class="error">Error loading <strong>${page}.php</strong>: ${error.message}</p>`;
+          '<p class="error">Error loading <strong>' + page + '.php</strong>: ' +
+          error.message + '</p>';
       });
   }
 
-  // Click handling for sidebar links
+  // sidebar clicks (only for links with data-page!)
   navLinks.forEach(link => {
     const page = link.getAttribute('data-page');
-    if (!page) return; // skip links without data-page (Manage Events, Logout)
-
     link.addEventListener('click', e => {
       e.preventDefault();
-
       navLinks.forEach(l => l.classList.remove('active'));
       link.classList.add('active');
-
       loadPage(page);
     });
   });
 
+  function activateSidebarAndLoad(page) {
+    navLinks.forEach(l => {
+      if (l.getAttribute('data-page') === page) {
+        l.classList.add('active');
+      } else {
+        l.classList.remove('active');
+      }
+    });
+    loadPage(page);
+  }
+
+  function initAdminDashboardQuickButtons() {
+    const btnUsers    = document.getElementById('btnQuickManageUsers');
+    const btnFee      = document.getElementById('btnQuickCreateFee');
+    const btnSchedule = document.getElementById('btnQuickManageSchedule');
+
+    if (btnUsers) {
+      btnUsers.onclick = () => activateSidebarAndLoad('manage-users');
+    }
+    if (btnFee) {
+      btnFee.onclick = () => activateSidebarAndLoad('create-fee');
+    }
+    if (btnSchedule) {
+      btnSchedule.onclick = () => activateSidebarAndLoad('manage-schedule');
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
-    // load default dashboard
     loadPage('dashboard-content');
 
-    // Restore dark mode
     const isDark = localStorage.getItem('darkMode') === 'enabled';
     if (isDark) {
       document.body.classList.add('dark-mode');
-      const darkToggle = document.getElementById('darkModeToggle');
-      if (darkToggle) darkToggle.checked = true;
+      const toggle = document.getElementById('darkModeToggle');
+      if (toggle) toggle.checked = true;
     }
   });
 
-  // -------- Notification toggle --------
-  const notificationBell = document.getElementById('notificationBell');
-  const notificationDropdown = document.getElementById('notificationDropdown');
-  if (notificationBell && notificationDropdown) {
-    notificationBell.addEventListener('click', () => {
-      notificationDropdown.classList.toggle('show');
-    });
-  }
+  /* ================== Notifications dropdown ================== */
+  (function() {
+    const toggle   = document.getElementById('notifToggle');
+    const dropdown = document.getElementById('notifDropdown');
+    if (!toggle || !dropdown) return;
 
-  // -------- Settings dropdown --------
-  const settingsToggle = document.getElementById('settingsToggle');
-  const settingsMenu   = document.getElementById('settingsMenu');
-  if (settingsToggle && settingsMenu) {
-    settingsToggle.addEventListener('click', () => {
-      settingsMenu.classList.toggle('show');
+    toggle.addEventListener('click', function(e) {
+      e.stopPropagation();
+      dropdown.classList.toggle('active');
     });
-  }
 
-  // -------- Dark mode toggle --------
+    document.addEventListener('click', function() {
+      dropdown.classList.remove('active');
+    });
+
+    dropdown.addEventListener('click', function(e) {
+      e.stopPropagation();
+    });
+  })();
+
+  /* ================== Profile dropdown ================== */
+  (function() {
+    const toggle   = document.getElementById('profileToggle');
+    const dropdown = document.getElementById('profileDropdown');
+    if (!toggle || !dropdown) return;
+
+    toggle.addEventListener('click', function(e) {
+      e.stopPropagation();
+      dropdown.classList.toggle('active');
+    });
+
+    document.addEventListener('click', function() {
+      dropdown.classList.remove('active');
+    });
+
+    dropdown.addEventListener('click', function(e) {
+      e.stopPropagation();
+    });
+  })();
+
+  /* ================== Dark mode toggle ================== */
   const darkToggle = document.getElementById('darkModeToggle');
   if (darkToggle) {
     darkToggle.addEventListener('change', () => {
@@ -376,95 +363,86 @@ try {
     });
   }
 
-  // ====== Charts for Reports ======
-  function renderCharts() {
-    const statsEl = document.getElementById('userRoleStats');
-    if (!statsEl) return;
+  /* ================== Dashboard charts ================== */
+  let adminRoleChart = null;
+  let adminClassChart = null;
 
-    const student = parseInt(statsEl.dataset.student || '0', 10);
-    const teacher = parseInt(statsEl.dataset.teacher || '0', 10);
-    const parent  = parseInt(statsEl.dataset.parent  || '0', 10);
-    const admin   = parseInt(statsEl.dataset.admin   || '0', 10);
+  function initAdminDashboardCharts() {
+    if (typeof Chart === 'undefined') {
+      console.warn('Chart.js not available – charts skipped.');
+      return;
+    }
 
-    const barCtx = document.getElementById('barChart');
-    if (barCtx) {
-      new Chart(barCtx, {
-        type: 'bar',
-        data: {
-          labels: ['Students', 'Teachers', 'Parents', 'Admins'],
-          datasets: [{
-            label: 'User count',
-            data: [student, teacher, parent, admin],
-            backgroundColor: '#4caf50'
-          }]
+    const rolesInput  = document.getElementById('userRoleStatsJson');
+    const classInput  = document.getElementById('classStatsJson');
+    const roleCanvas  = document.getElementById('userDistributionChart');
+    const classCanvas = document.getElementById('studentsPerClassChart');
+
+    if (!rolesInput || !classInput || !roleCanvas || !classCanvas) {
+      return;
+    }
+
+    let roleData = [];
+    let classData = [];
+
+    try {
+      roleData  = JSON.parse(rolesInput.value || '[]');
+      classData = JSON.parse(classInput.value || '[]');
+    } catch (e) {
+      console.error('Error parsing dashboard JSON', e);
+      return;
+    }
+
+    const roleLabels = roleData.map(item => item.label);
+    const roleCounts = roleData.map(item => item.count);
+
+    const classLabels = classData.map(item => item.class_name);
+    const classCounts = classData.map(item => item.count);
+
+    if (adminRoleChart) adminRoleChart.destroy();
+    if (adminClassChart) adminClassChart.destroy();
+
+    const roleCtx  = roleCanvas.getContext('2d');
+    const classCtx = classCanvas.getContext('2d');
+
+    adminRoleChart = new Chart(roleCtx, {
+      type: 'doughnut',
+      data: {
+        labels: roleLabels,
+        datasets: [{
+          data: roleCounts,
+          backgroundColor: ['#f97316', '#22c55e', '#3b82f6', '#facc15']
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom' }
         },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            y: { beginAtZero: true, precision: 0, ticks: { stepSize: 1 } }
-          }
+        cutout: '60%'
+      }
+    });
+
+    adminClassChart = new Chart(classCtx, {
+      type: 'bar',
+      data: {
+        labels: classLabels,
+        datasets: [{
+          label: 'Students',
+          data: classCounts,
+          backgroundColor: '#f97316'
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: { beginAtZero: true, ticks: { precision: 0 } }
         }
-      });
-    }
-
-    const pieCtx = document.getElementById('pieChart');
-    if (pieCtx) {
-      new Chart(pieCtx, {
-        type: 'pie',
-        data: {
-          labels: ['Students', 'Teachers', 'Parents', 'Admins'],
-          datasets: [{
-            data: [student, teacher, parent, admin],
-            backgroundColor: ['#36a2eb', '#ff6384', '#ffcd56', '#4caf50']
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false
-        }
-      });
-    }
-  }
-
-  // ====== NEW: Init Schedule View (class dropdown + print) ======
-  function initScheduleView() {
-    const classSelect   = document.getElementById('sv-class-select');
-    const tableContainer = document.getElementById('sv-table-container');
-    const printBtn      = document.getElementById('sv-print-btn');
-
-    // Class change → reload table via AJAX (partial=1)
-    if (classSelect && tableContainer) {
-      classSelect.addEventListener('change', function () {
-        const val = this.value || 1;
-        tableContainer.innerHTML = '<p>Loading schedule...</p>';
-
-        fetch(`../../dashboards/admin/schedule-view.php?class=${encodeURIComponent(val)}&partial=1`, {
-          cache: 'no-cache'
-        })
-        .then(res => {
-          if (!res.ok) throw new Error('Failed to load schedule');
-          return res.text();
-        })
-        .then(html => {
-          tableContainer.innerHTML = html;
-        })
-        .catch(err => {
-          console.error(err);
-          tableContainer.innerHTML =
-            '<p class="sv-error">Error loading schedule. Please try again.</p>';
-        });
-      });
-    }
-
-    // Print / Save as PDF (browser print dialog)
-    if (printBtn) {
-      printBtn.addEventListener('click', function () {
-        window.print();
-      });
-    }
+      }
+    });
   }
 </script>
-
 </body>
 </html>

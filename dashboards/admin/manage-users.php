@@ -104,50 +104,50 @@ try {
 function e($v) { return htmlspecialchars($v ?? '', ENT_QUOTES); }
 ?>
 
-<section class="section manage-users">
-  <h3 style="margin-bottom: 16px;">Manage Users</h3>
-  <p style="margin-bottom: 18px; color:#555; font-size:0.95rem;">
-    View all registered users and remove accounts when necessary.
-  </p>
-
-  <div id="manageUsersAlert" style="display:none; margin-bottom:12px;"></div>
-
-  <div class="card" style="width:100%; max-width:100%; flex:1 1 auto;">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-      <h4 style="margin:0; font-size:1rem; color:#111;">All Registered Users</h4>
-      <span style="font-size:0.85rem; color:#666;">
-        Total: <?php echo count($users); ?>
-      </span>
+<section class="manage-users">
+  <div class="panel">
+    <div class="panel-header">
+      <h4>Manage Users</h4>
+      <span><?php echo count($users); ?> registered account(s)</span>
     </div>
 
-    <div style="overflow-x:auto;">
-      <table class="manage-users-table">
+    <p style="margin-bottom: 14px; color: var(--text-muted); font-size:0.92rem;">
+      View all registered users and remove accounts when necessary. Later you can
+      add filters by role (Student / Teacher / Parent / Admin) or export options.
+    </p>
+
+    <div id="manageUsersAlert" style="display:none; margin-bottom:12px;"></div>
+
+    <div class="table-container" style="margin:0; padding:0; border-radius:0; box-shadow:none;">
+      <table class="gradebook-table manage-users-table">
         <thead>
           <tr>
-            <th>ID</th>
+            <th style="width:60px;">ID</th>
             <th>Full Name</th>
             <th>Email</th>
-            <th>Phone</th>
-            <th>Role</th>
-            <th>Gender</th>
-            <th style="text-align:center;">Actions</th>
+            <th style="width:130px;">Phone</th>
+            <th style="width:110px;">Role</th>
+            <th style="width:80px;">Gender</th>
+            <th style="width:140px; text-align:center;">Actions</th>
           </tr>
         </thead>
         <tbody>
           <?php if (!empty($users)): ?>
             <?php foreach ($users as $u): ?>
               <tr data-user-id="<?php echo (int)$u['id']; ?>">
-                <td><?php echo (int)$u['id']; ?></td>
-                <td><?php echo e($u['first_name'] . ' ' . $u['last_name']); ?></td>
-                <td><?php echo e($u['email']); ?></td>
-                <td><?php echo e($u['phone']); ?></td>
-                <td>
+                <td data-label="ID"><?php echo (int)$u['id']; ?></td>
+                <td data-label="Full Name">
+                  <?php echo e(trim($u['first_name'] . ' ' . $u['last_name'])); ?>
+                </td>
+                <td data-label="Email"><?php echo e($u['email']); ?></td>
+                <td data-label="Phone"><?php echo e($u['phone']); ?></td>
+                <td data-label="Role">
                   <span class="role-badge role-<?php echo strtolower(e($u['role'])); ?>">
                     <?php echo e(ucfirst($u['role'])); ?>
                   </span>
                 </td>
-                <td><?php echo e($u['gender']); ?></td>
-                <td style="text-align:center;">
+                <td data-label="Gender"><?php echo e($u['gender']); ?></td>
+                <td data-label="Actions" style="text-align:center;">
                   <button
                     type="button"
                     class="btn-delete-user"
@@ -160,7 +160,7 @@ function e($v) { return htmlspecialchars($v ?? '', ENT_QUOTES); }
             <?php endforeach; ?>
           <?php else: ?>
             <tr>
-              <td colspan="7" style="text-align:center; padding:14px; color:#777;">
+              <td colspan="7" style="text-align:center; padding:18px; color:var(--text-muted);">
                 No users found.
               </td>
             </tr>
@@ -172,54 +172,70 @@ function e($v) { return htmlspecialchars($v ?? '', ENT_QUOTES); }
 </section>
 
 <style>
-  /* Table styled to match EduSphere green theme */
-  .manage-users-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.95rem;
-  }
-  .manage-users-table thead {
-    background: #111;
-    color: #fff;
-  }
-  .manage-users-table th,
-  .manage-users-table td {
-    padding: 10px 14px;
-    border-bottom: 1px solid #e5e7eb;
-    text-align: left;
-  }
-  .manage-users-table tbody tr:nth-child(even) {
-    background: #fafafa;
-  }
-  .manage-users-table tbody tr:hover {
-    background: #f6fef8;
+  /* Manage Users table – aligned with amber dashboard theme */
+
+  .manage-users .panel {
+    /* panel base comes from dashboard.css; no changes here */
   }
 
+  .manage-users-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0 8px;
+    font-size: 0.95rem;
+  }
+
+  /* We reuse gradebook-table header style from dashboard.css,
+     so only small tweaks if needed */
+  .manage-users-table thead tr {
+    /* use existing amber gradient; no override */
+  }
+
+  .manage-users-table tbody tr {
+    background: #f9fafb;
+  }
+
+  .manage-users-table tbody tr:hover {
+    background-color: #fff7eb;
+  }
+
+  .manage-users-table tbody td {
+    border: none;
+  }
+
+  /* Delete button */
   .btn-delete-user {
-    padding: 6px 12px;
-    font-size: 0.83rem;
+    padding: 6px 14px;
+    font-size: 0.82rem;
     border-radius: 999px;
     border: none;
     cursor: pointer;
     background: #ef4444;
     color: #fff;
     box-shadow: 0 2px 6px rgba(239, 68, 68, 0.3);
-    transition: background 0.2s, box-shadow 0.2s, transform 0.1s;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    transition: background 0.18s, box-shadow 0.18s, transform 0.12s;
   }
   .btn-delete-user:hover {
     background: #dc2626;
-    box-shadow: 0 3px 10px rgba(220, 38, 38, 0.35);
+    box-shadow: 0 4px 10px rgba(220, 38, 38, 0.35);
     transform: translateY(-1px);
   }
 
+  /* Role badges with warm colors */
   .role-badge {
     display: inline-block;
-    padding: 4px 10px;
+    padding: 4px 12px;
     border-radius: 999px;
     font-size: 0.78rem;
     font-weight: 600;
-    background: #e5f9ea;
-    color: #166534;
+    background: #e5f6ff;
+    color: #1d4ed8;
+  }
+  .role-badge.role-student {
+    background: #dcfce7;
+    color: #15803d;
   }
   .role-badge.role-teacher {
     background: #e0f2fe;
@@ -234,6 +250,7 @@ function e($v) { return htmlspecialchars($v ?? '', ENT_QUOTES); }
     color: #b91c1c;
   }
 
+  /* Alert box styles */
   .manage-users-alert-success {
     background: #ecfdf3;
     border: 1px solid #bbf7d0;
@@ -252,10 +269,9 @@ function e($v) { return htmlspecialchars($v ?? '', ENT_QUOTES); }
   }
 
   @media (max-width: 768px) {
-    .manage-users-table th,
-    .manage-users-table td {
-      padding: 8px 10px;
-      font-size: 0.85rem;
+    .manage-users-table {
+      border-spacing: 0 6px;
+      font-size: 0.88rem;
     }
   }
 </style>

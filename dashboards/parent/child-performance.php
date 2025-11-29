@@ -2,94 +2,124 @@
 session_start();
 require_once '../../includes/db.php';
 
-// Make sure the parent is logged in
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'parent') {
-    die('<p style="color:red;">Access denied. Please log in as a parent.</p>');
+if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'parent') {
+    echo '<div class="alert alert-error">Access denied. Please log in as a parent.</div>';
+    exit;
 }
 
-$parent_id = $_SESSION['user_id'];
+$parent_id = (int)$_SESSION['user_id'];
 
-// Find the child student_id for this parent from the parents table
-try {
-    $stmt = $conn->prepare("SELECT student_id FROM parents WHERE user_id = :parent_id LIMIT 1");
-    $stmt->execute([':parent_id' => $parent_id]);
-    $childRow = $stmt->fetch(PDO::FETCH_ASSOC);
-    if (!$childRow) {
-        die('<p style="color:red;">No child linked to this parent account.</p>');
-    }
-    $child_student_id = $childRow['student_id'];
-} catch (PDOException $e) {
-    die('<p style="color:red;">Database error: ' . htmlspecialchars($e->getMessage()) . '</p>');
-}
-
-// Fetch latest grades for each subject in 'Exam' or 'Assignment' category
+// For small subtitle: child name (if linked)
+$child_name = 'your child';
 try {
     $stmt = $conn->prepare("
-        SELECT title AS subject, score
-        FROM grades
-        WHERE student_id = :student_id AND category IN ('Exam', 'Assignment')
-        ORDER BY subject, date_added DESC
+        SELECT 
+            CONCAT(u.first_name, ' ', u.last_name) AS full_name
+        FROM parents p
+        JOIN students s ON p.student_id = s.user_id
+        JOIN users   u ON s.user_id   = u.id
+        WHERE p.user_id = :pid
+        LIMIT 1
     ");
-    $stmt->execute([':student_id' => $child_student_id]);
-    $gradeRows = $stmt->fetchAll();
-
-    // Only keep the latest score per subject
-    $latestScores = [];
-    foreach ($gradeRows as $row) {
-        $subject = $row['subject'];
-        if (!isset($latestScores[$subject])) {
-            $latestScores[$subject] = floatval($row['score']);
-        }
+    $stmt->execute([':pid' => $parent_id]);
+    if ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $child_name = $row['full_name'];
     }
-} catch (PDOException $e) {
-    echo '<p style="color:red;">Database error: ' . htmlspecialchars($e->getMessage()) . '</p>';
-    $latestScores = [];
+} catch (Exception $e) {
+    // ignore; just use default text
+}
+
+$events       = [];
+$errorMessage = null;
+
+try {
+    // NOTE: no e.class_name here at all
+    $stmt = $conn->prepare("
+        SELECT 
+            e.event_date,
+            e.start_time,
+            e.end_time,
+            e.title,
+            e.description,
+            e.location,
+            e.is_active,
+            c.name AS category_name
+        FROM events e
+        LEFT JOIN event_categories c ON e.category_id = c.id
+        WHERE e.is_active = 1
+        ORDER BY e.event_date DESC, e.start_time DESC
+        LIMIT 50
+    ");
+    $stmt->execute();
+    $events = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (Exception $e) {
+    $errorMessage = 'Error loading notices: ' . $e->getMessage();
 }
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Child Academic Performance</title>
-<style>
-  .performance-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-family: Arial, sans-serif;
-  }
-  .performance-table th, .performance-table td {
-    padding: 8px;
-    border-bottom: 1px solid #ddd;
-  }
-  .performance-table th {
-    background-color: #4caf50;
-    color: white;
-    text-align: left;
-  }
-</style>
-</head>
-<body>
 
-<h3>Your child’s recent academic scores:</h3>
+<div class="section">
+  <div class="section-header">
+    <h2>Notices &amp; School Events</h2>
+    <p>Announcements and events relevant to <?= htmlspecialchars($child_name) ?>.</p>
+  </div>
 
-<table class="performance-table">
-  <thead>
-    <tr><th>Subject</th><th>Score (%)</th></tr>
-  </thead>
-  <tbody>
-    <?php if (empty($latestScores)): ?>
-      <tr><td colspan="2">No scores available.</td></tr>
-    <?php else: ?>
-      <?php foreach ($latestScores as $subject => $score): ?>
+  <?php if ($errorMessage): ?>
+    <div class="alert alert-error">
+      <?= htmlspecialchars($errorMessage) ?>
+    </div>
+  <?php endif; ?>
+
+  <div class="card">
+    <table class="data-table">
+      <thead>
         <tr>
-          <td><?= htmlspecialchars($subject) ?></td>
-          <td><?= htmlspecialchars($score) ?></td>
+          <th>Date</th>
+          <th>Title</th>
+          <th>Category</th>
+          <th>Details</th>
         </tr>
-      <?php endforeach; ?>
-    <?php endif; ?>
-  </tbody>
-</table>
+      </thead>
+      <tbody>
+      <?php if (empty($events)): ?>
+        <tr>
+          <td colspan="4">No notices or events available.</td>
+        </tr>
+      <?php else: ?>
+        <?php foreach ($events as $e): ?>
+          <tr>
+            <td>
+              <?php
+                $dateStr = $e['event_date'] ?? '';
+                echo $dateStr ? htmlspecialchars(date('M d, Y', strtotime($dateStr))) : '-';
+              ?>
+              <?php if (!empty($e['start_time'])): ?>
+                <br><span style="font-size:0.78rem;color:#6b7280;">
+                  <?= htmlspecialchars(substr($e['start_time'], 0, 5)) ?>
+                  <?php if (!empty($e['end_time'])): ?>
+                    – <?= htmlspecialchars(substr($e['end_time'], 0, 5)) ?>
+                  <?php endif; ?>
+                </span>
+              <?php endif; ?>
+            </td>
+            <td><?= htmlspecialchars($e['title']) ?></td>
+            <td><?= htmlspecialchars($e['category_name'] ?? 'General') ?></td>
+            <td>
+              <div style="font-size:0.86rem;">
+                <?php if (!empty($e['location'])): ?>
+                  <strong>Location:</strong> <?= htmlspecialchars($e['location']) ?><br>
+                <?php endif; ?>
 
-</body>
-</html>
+                <?php if (!empty($e['description'])): ?>
+                  <?= htmlspecialchars(mb_strimwidth($e['description'], 0, 120, '…')) ?>
+                <?php else: ?>
+                  <span style="color:#6b7280;">No extra details.</span>
+                <?php endif; ?>
+              </div>
+            </td>
+          </tr>
+        <?php endforeach; ?>
+      <?php endif; ?>
+      </tbody>
+    </table>
+  </div>
+</div>
