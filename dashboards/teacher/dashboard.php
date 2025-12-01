@@ -14,6 +14,27 @@ $teacher_name   = $_SESSION['teacher_name']  ?? 'Teacher';
 $teacher_email  = $_SESSION['teacher_email'] ?? 'teacher@example.com';
 $teacher_avatar = '../../assets/img/user.jpg'; // static avatar for now
 
+/* -------------------------------------------------------
+   Helper: parse score string ("45/50", "72", "72.5/100")
+--------------------------------------------------------*/
+function score_to_percent(?string $score): ?float {
+    if ($score === null) return null;
+    $s = trim($score);
+    if ($s === '') return null;
+
+    if (preg_match('/^(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?$/', $s, $m)) {
+        $obt = (float)$m[1];
+        if (!empty($m[2])) {
+            $max = (float)$m[2];
+            if ($max <= 0) return null;
+            return ($obt / $max) * 100.0;
+        }
+        // No max given – assume already a percentage
+        return $obt;
+    }
+    return null;
+}
+
 // ---------- DASHBOARD STATS ----------
 $stats = [
     'total_assignments' => 0,
@@ -54,7 +75,7 @@ try {
 try {
     $stmt = $conn->query("
         SELECT 
-          SUM(CASE WHEN status = 'present' THEN 1 ELSE 0 END) AS present_days,
+          SUM(CASE WHEN LOWER(status) = 'present' THEN 1 ELSE 0 END) AS present_days,
           COUNT(*) AS total_records
         FROM attendance
     ");
@@ -73,15 +94,15 @@ $attendanceByClass = [];
 try {
     $stmt = $conn->query("
         SELECT 
-            s.class_name,
-            SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END) AS present_days,
+            s.class AS class_name,
+            SUM(CASE WHEN LOWER(a.status) = 'present' THEN 1 ELSE 0 END) AS present_days,
             COUNT(*) AS total_records
         FROM attendance a
         JOIN students s ON a.student_id = s.user_id
-        WHERE s.class_name IS NOT NULL AND s.class_name <> ''
-        GROUP BY s.class_name
+        WHERE s.class IS NOT NULL AND s.class <> ''
+        GROUP BY s.class
         HAVING total_records > 0
-        ORDER BY s.class_name
+        ORDER BY s.class
     ");
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
         $present = (int)$row['present_days'];
@@ -94,6 +115,170 @@ try {
         }
     }
 } catch (Exception $e) {}
+
+/* -------------------------------------------------------
+   AT-RISK STUDENTS  (same logic as gradebook)
+   - combines logistic regression probability (if coeffs exist)
+     and decision-tree style rules
+--------------------------------------------------------*/
+$attendanceAgg   = [];
+$gradeAgg        = [];
+$disciplineAgg   = [];
+$atRiskStudents  = [];
+$logisticCoeffs  = null; // [b0,b1,b2,b3,b4]
+
+try {
+    // Attendance % per student
+    $stmt = $conn->query("
+        SELECT student_id,
+               SUM(CASE WHEN LOWER(status) = 'present' THEN 1 ELSE 0 END) AS present_days,
+               SUM(CASE WHEN LOWER(status) = 'absent'  THEN 1 ELSE 0 END) AS absent_days
+        FROM attendance
+        GROUP BY student_id
+    ");
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $present = (int)$row['present_days'];
+        $absent  = (int)$row['absent_days'];
+        $total   = $present + $absent;
+        $percent = $total > 0 ? round(($present / $total) * 100, 1) : null;
+        $attendanceAgg[(int)$row['student_id']] = $percent;
+    }
+
+    // Average grade % per student
+    $stmt = $conn->query("SELECT student_id, score FROM grades");
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $sid     = (int)$row['student_id'];
+        $percent = score_to_percent($row['score']);
+        if ($percent === null) continue;
+        if (!isset($gradeAgg[$sid])) {
+            $gradeAgg[$sid] = ['sum' => 0.0, 'count' => 0];
+        }
+        $gradeAgg[$sid]['sum']   += $percent;
+        $gradeAgg[$sid]['count'] += 1;
+    }
+    foreach ($gradeAgg as $sid => $g) {
+        $gradeAgg[$sid] = $g['count'] > 0 ? round($g['sum'] / $g['count'], 1) : null;
+    }
+
+    // Discipline incidents per student
+    $stmt = $conn->query("
+        SELECT student_id, COUNT(*) AS c
+        FROM grades
+        WHERE category = 'Discipline'
+        GROUP BY student_id
+    ");
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $disciplineAgg[(int)$row['student_id']] = (int)$row['c'];
+    }
+
+    // Optional: logistic regression coefficients from ML training
+    // Table example: risk_logistic_coeffs(beta0,beta1,beta2,beta3,beta4,created_at)
+    try {
+        $stmt = $conn->query("
+            SELECT beta0, beta1, beta2, beta3, beta4
+            FROM risk_logistic_coeffs
+            ORDER BY created_at DESC
+            LIMIT 1
+        ");
+        if ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $logisticCoeffs = [
+                (float)$row['beta0'],
+                (float)$row['beta1'],
+                (float)$row['beta2'],
+                (float)$row['beta3'],
+                (float)$row['beta4'],
+            ];
+        }
+    } catch (Exception $e) {
+        $logisticCoeffs = null; // safe fallback if table missing
+    }
+
+    // All students (for names + class)
+    $stmt = $conn->query("
+        SELECT s.user_id AS id,
+               s.class AS class_name,
+               CONCAT(u.first_name,' ',u.last_name) AS name
+        FROM students s
+        JOIN users u ON s.user_id = u.id
+        WHERE u.role = 'Student'
+        ORDER BY u.first_name, u.last_name
+    ");
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $id    = (int)$row['id'];
+        $name  = $row['name'];
+        $class = $row['class_name'] ?: '—';
+        $att   = $attendanceAgg[$id] ?? null;
+        $gr    = $gradeAgg[$id]      ?? null;
+        $disc  = $disciplineAgg[$id] ?? 0;
+
+        // skip if we really have no data
+        if ($att === null && $gr === null) {
+            continue;
+        }
+
+        // ---- Decision-tree style risk rules ----
+        $ruleLevel = 'LOW';
+        if (($att !== null && $att < 60) || ($gr !== null && $gr < 40) || $disc >= 3) {
+            $ruleLevel = 'HIGH';
+        } elseif (($att !== null && $att < 75) || ($gr !== null && $gr < 55) || $disc >= 1) {
+            $ruleLevel = 'MEDIUM';
+        }
+
+        // ---- Logistic regression probability (if coefficients exist) ----
+        $prob = null;
+        if ($logisticCoeffs) {
+            [$b0,$b1,$b2,$b3,$b4] = $logisticCoeffs;
+            $x1 = $att   ?? 0.0;
+            $x2 = $gr    ?? 0.0;
+            $x3 = $disc  ?? 0.0;
+            $x4 = 100.0; // placeholder assignment completion %
+            $z  = $b0 + $b1*$x1 + $b2*$x2 + $b3*$x3 + $b4*$x4;
+            $prob = 1.0 / (1.0 + exp(-$z));
+            $prob = round($prob, 3);
+        }
+
+        // ---- Combine rule + probability into final risk ----
+        $final = 'LOW';
+        if ($ruleLevel === 'HIGH' || ($prob !== null && $prob >= 0.75)) {
+            $final = 'HIGH';
+        } elseif ($ruleLevel === 'MEDIUM' || ($prob !== null && $prob >= 0.50)) {
+            $final = 'MEDIUM';
+        }
+
+        if ($final !== 'LOW') {
+            $atRiskStudents[] = [
+                'name'       => $name,
+                'class'      => $class,
+                'attendance' => $att,
+                'grade'      => $gr,
+                'discipline' => $disc,
+                'prob'       => $prob,
+                'rule'       => $ruleLevel,
+                'final'      => $final,
+            ];
+        }
+    }
+
+    // sort: HIGH first, then by probability desc / worst attendance
+    usort($atRiskStudents, function($a, $b) {
+        $order = ['HIGH' => 2, 'MEDIUM' => 1, 'LOW' => 0];
+        $cmp   = $order[$b['final']] <=> $order[$a['final']];
+        if ($cmp !== 0) return $cmp;
+        // higher probability first
+        $pa = $a['prob'] ?? 0;
+        $pb = $b['prob'] ?? 0;
+        if ($pa != $pb) return $pb <=> $pa;
+        // lower attendance first
+        return ($a['attendance'] ?? 100) <=> ($b['attendance'] ?? 100);
+    });
+
+    // limit dashboard “highlight” to top 4
+    if (count($atRiskStudents) > 4) {
+        $atRiskStudents = array_slice($atRiskStudents, 0, 4);
+    }
+} catch (Exception $e) {
+    $atRiskStudents = [];
+}
 
 // ---------- NOTIFICATIONS ----------
 $notifications = [];
@@ -207,7 +392,7 @@ try {
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-    <style>
+  <style>
     :root {
       --bg-page: #f5eee9;
       --bg-shell: #fdfcfb;
@@ -265,13 +450,6 @@ try {
 
     .logo img {
       height: 40px;
-    }
-
-    .logo span {
-      font-weight: 700;
-      font-size: 1.15rem;
-      color: #1f2937;
-      letter-spacing: 0.04em;
     }
 
     .nav {
@@ -456,9 +634,7 @@ try {
     }
 
     /* PROFILE DROPDOWN */
-    .profile-wrapper {
-      position: relative;
-    }
+    .profile-wrapper { position: relative; }
 
     .header-avatar {
       display: flex;
@@ -650,21 +826,31 @@ try {
       gap: 18px;
     }
 
+    /* hero row: overview + at-risk side-by-side */
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.7fr) minmax(0, 1.5fr);
+      gap: 18px;
+      align-items: stretch;
+    }
+
     /* Cards general hover */
     .hero-card,
+    .risk-hero-card,
     .stat-card,
     .panel {
       transition: transform 0.16s ease-out, box-shadow 0.16s ease-out;
     }
 
     .hero-card:hover,
+    .risk-hero-card:hover,
     .stat-card:hover,
     .panel:hover {
       transform: translateY(-3px);
       box-shadow: 0 18px 40px rgba(15,23,42,0.12);
     }
 
-    /* HERO + CLIPART AREA */
+    /* HERO OVERVIEW CARD */
     .hero-card {
       background: radial-gradient(circle at top right, #ffe6b0, #fff7ea);
       border-radius: 22px;
@@ -726,7 +912,6 @@ try {
       min-width: 170px;
     }
 
-    /* fun “clipart style” */
     .hero-graphic {
       display: flex;
       flex-direction: column;
@@ -762,13 +947,127 @@ try {
       padding: 11px 16px;
       font-size: 0.9rem;
       box-shadow: var(--shadow-card);
-      color: var(--text-muted);
+      color: #9ca3af;
       border: 1px solid var(--border-soft);
       min-width: 155px;
       text-align: right;
     }
 
     .hero-pill strong { color: var(--text-main); }
+
+    /* AT-RISK HERO CARD */
+    .risk-hero-card {
+      background: radial-gradient(circle at top left, #fee2e2, #fff7ea);
+      border-radius: 22px;
+      padding: 22px 24px 20px;
+      box-shadow: var(--shadow-card);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .risk-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .risk-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #7f1d1d;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .risk-title i {
+      font-size: 1rem;
+    }
+
+    .risk-count-badge {
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      background: #fee2e2;
+      color: #b91c1c;
+      border: 1px solid #fecaca;
+      font-weight: 600;
+    }
+
+    .risk-subtitle {
+      margin: 2px 0 6px;
+      font-size: 0.85rem;
+      color: #9f1239;
+    }
+
+    .risk-empty {
+      font-size: 0.9rem;
+      color: #9ca3af;
+      margin-top: 8px;
+    }
+
+    .risk-list {
+      list-style: none;
+      margin: 4px 0 0;
+      padding: 0;
+      font-size: 0.88rem;
+    }
+
+    .risk-item {
+      padding: 6px 0;
+      border-bottom: 1px dashed rgba(254,202,202,0.9);
+    }
+
+    .risk-item:last-child { border-bottom: none; }
+
+    .risk-main-line {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 2px;
+    }
+
+    .risk-name {
+      font-weight: 600;
+      color: #7f1d1d;
+    }
+
+    .risk-chip {
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.74rem;
+      font-weight: 700;
+    }
+
+    .risk-chip-high {
+      background: #b91c1c;
+      color: #fee2e2;
+    }
+
+    .risk-chip-medium {
+      background: #f97316;
+      color: #fff7ed;
+    }
+
+    .risk-meta {
+      font-size: 0.78rem;
+      color: #9f1239;
+    }
+
+    .risk-meta span + span::before {
+      content: "· ";
+      margin: 0 2px;
+    }
+
+    .risk-footnote {
+      margin-top: 6px;
+      font-size: 0.76rem;
+      color: #9ca3af;
+    }
 
     .stats-row {
       display: grid;
@@ -938,17 +1237,18 @@ try {
 
     /* RESPONSIVE */
     @media (max-width: 1100px) {
-      .app-shell { grid-template-columns: 230px 1fr; }
-      .stats-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .content-grid { grid-template-columns: 1fr; }
+      .app-shell        { grid-template-columns: 230px 1fr; }
+      .stats-row        { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .content-grid     { grid-template-columns: 1fr; }
+      .hero-grid        { grid-template-columns: 1fr; }
     }
 
     @media (max-width: 800px) {
-      .app-shell { grid-template-columns: 1fr; }
-      .sidebar { display: none; }
-      .main { padding: 18px; }
-      .content-grid { grid-template-columns: 1fr; }
-      .main-header { flex-direction: column; align-items: flex-start; gap: 10px; }
+      .app-shell     { grid-template-columns: 1fr; }
+      .sidebar       { display: none; }
+      .main          { padding: 18px; }
+      .content-grid  { grid-template-columns: 1fr; }
+      .main-header   { flex-direction: column; align-items: flex-start; gap: 10px; }
       .main-header-right { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
     }
   </style>
@@ -1055,33 +1355,93 @@ try {
         <div class="content-grid">
           <!-- LEFT COLUMN -->
           <section class="left-column">
-            <div class="hero-card">
-              <div class="hero-left">
-                <h3>Today’s Teaching Overview</h3>
-                <p>Your assignments, grades and attendance all in one place.</p>
-                <div class="hero-metric">
-                  <span class="big"><?= $stats['open_assignments'] ?></span>
-                  <span>open assignments to review</span>
+
+            <!-- TOP ROW: OVERVIEW + AT-RISK HIGHLIGHT -->
+            <div class="hero-grid">
+              <div class="hero-card">
+                <div class="hero-left">
+                  <h3>Today’s Teaching Overview</h3>
+                  <p>Your assignments, grades and attendance all in one place.</p>
+                  <div class="hero-metric">
+                    <span class="big"><?= $stats['open_assignments'] ?></span>
+                    <span>open assignments to review</span>
+                  </div>
+                  <button class="hero-btn" onclick="window.location.href='manage-assignments.php'">
+                    View Assignments
+                  </button>
                 </div>
-                <button class="hero-btn" onclick="window.location.href='manage-assignments.php'">View Assignments</button>
+                <div class="hero-right">
+                  <div class="hero-graphic">
+                    <div class="hero-circle">
+                      <i class="fas fa-chalkboard-teacher"></i>
+                    </div>
+                    <span>Happy teaching, <?= htmlspecialchars($teacher_name) ?>!</span>
+                  </div>
+
+                  <div class="hero-pill">
+                    <strong><?= $stats['total_students'] ?></strong> students<br/>
+                    Attendance:
+                    <strong><?= $stats['attendance_avg'] !== null ? $stats['attendance_avg'].'%' : '—' ?></strong>
+                  </div>
+                </div>
               </div>
-              <div class="hero-right">
-  <div class="hero-graphic">
-    <div class="hero-circle">
-      <i class="fas fa-chalkboard-teacher"></i>
-    </div>
-    <span>Happy teaching, <?= htmlspecialchars($teacher_name) ?>!</span>
-  </div>
 
-  <div class="hero-pill">
-    <strong><?= $stats['total_students'] ?></strong> students<br/>
-    Attendance: <strong><?= $stats['attendance_avg'] !== null ? $stats['attendance_avg'].'%' : '—' ?></strong>
-  </div>
-</div>
+              <!-- AT-RISK STUDENTS HIGHLIGHT CARD -->
+              <div class="risk-hero-card">
+                <div class="risk-header">
+                  <div class="risk-title">
+                    <i class="fas fa-triangle-exclamation"></i>
+                    <span>At-Risk Students</span>
+                  </div>
+                  <span class="risk-count-badge">
+                    <?= count($atRiskStudents) ?> flagged
+                  </span>
+                </div>
+                <p class="risk-subtitle">
+                  Combined logistic regression probability and decision-tree rules.
+                </p>
 
+                <?php if (empty($atRiskStudents)): ?>
+                  <p class="risk-empty">
+                    No students flagged as at-risk yet. 🎉<br/>
+                    As you record grades and attendance, students needing support will appear here.
+                  </p>
+                <?php else: ?>
+                  <ul class="risk-list">
+                    <?php foreach ($atRiskStudents as $s): ?>
+                      <li class="risk-item">
+                        <div class="risk-main-line">
+                          <span class="risk-name"><?= htmlspecialchars($s['name']) ?></span>
+                          <?php
+                            $chipClass = $s['final'] === 'HIGH' ? 'risk-chip-high' : 'risk-chip-medium';
+                          ?>
+                          <span class="risk-chip <?= $chipClass ?>">
+                            <?= htmlspecialchars($s['final']) ?>
+                          </span>
+                        </div>
+                        <div class="risk-meta">
+                          <span>Class <?= htmlspecialchars($s['class']) ?></span>
+                          <?php if ($s['attendance'] !== null): ?>
+                            <span>Att: <?= htmlspecialchars($s['attendance']) ?>%</span>
+                          <?php endif; ?>
+                          <?php if ($s['grade'] !== null): ?>
+                            <span>Grade: <?= htmlspecialchars($s['grade']) ?>%</span>
+                          <?php endif; ?>
+                          <?php if ($s['prob'] !== null): ?>
+                            <span>P(At-risk): <?= number_format($s['prob'] * 100, 1) ?>%</span>
+                          <?php endif; ?>
+                        </div>
+                      </li>
+                    <?php endforeach; ?>
+                  </ul>
+                  <div class="risk-footnote">
+                    Full details are available in <strong>Grade Book &gt; At-Risk panel</strong>.
+                  </div>
+                <?php endif; ?>
               </div>
             </div>
 
+            <!-- STATS + PANELS BELOW -->
             <div class="stats-row">
               <div class="stat-card">
                 <div class="stat-label">Assignments</div>
@@ -1231,9 +1591,7 @@ try {
 
     // Attendance chart
     (function() {
-      const data = <?=
-        json_encode($attendanceByClass, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-      ?>;
+      const data = <?= json_encode($attendanceByClass, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
       if (!data || !data.length) return;
       const canvas = document.getElementById('attendanceChart');
       if (!canvas) return;

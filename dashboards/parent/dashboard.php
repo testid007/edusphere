@@ -18,8 +18,15 @@ $parent_email = $_SESSION['parent_email'] ?? 'parent@example.com';
 $parent_avatar = '../../assets/img/user.jpg';
 
 // try to get linked child
-$child_name  = null;
-$child_class = null;
+$child_name        = null;
+$child_class       = null;
+$child_student_id  = null;
+
+// risk flags for child
+$is_child_at_risk  = false;
+$risk_reasons      = [];
+$attendance_pct    = null;
+$low_score_count   = 0;
 
 try {
     $stmt = $conn->prepare("
@@ -34,12 +41,63 @@ try {
     ");
     $stmt->execute([':pid' => $parent_id]);
     if ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        $child_name  = $row['full_name'];
-        $child_class = $row['class'];
-        $_SESSION['child_student_id'] = (int)$row['student_id'];
+        $child_name        = $row['full_name'];
+        $child_class       = $row['class'];
+        $child_student_id  = (int)$row['student_id'];
+        $_SESSION['child_student_id'] = $child_student_id;
     }
 } catch (Exception $e) {
     // silent; sub-pages handle
+}
+
+// --- SIMPLE CHILD RISK CALCULATION (attendance + grades) ---
+if ($child_student_id) {
+    try {
+        // Attendance percentage
+        $stmt = $conn->prepare("
+            SELECT 
+                SUM(CASE WHEN LOWER(status) = 'present' THEN 1 ELSE 0 END) AS present,
+                COUNT(*) AS total
+            FROM attendance
+            WHERE student_id = :sid
+        ");
+        $stmt->execute([':sid' => $child_student_id]);
+        $att = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($att && $att['total'] > 0) {
+            $attendance_pct = round(($att['present'] / $att['total']) * 100, 1);
+        } else {
+            $attendance_pct = null;
+        }
+
+        // Low grade / low score count
+        $stmt = $conn->prepare("
+            SELECT COUNT(*) 
+            FROM grades 
+            WHERE student_id = :sid 
+              AND (grade = 'F' OR score < 40)
+        ");
+        $stmt->execute([':sid' => $child_student_id]);
+        $low_score_count = (int)$stmt->fetchColumn();
+
+        // Thresholds (you can tweak):
+        // - attendance < 75%
+        // - any very low scores
+        if (($attendance_pct !== null && $attendance_pct < 75) || $low_score_count > 0) {
+            $is_child_at_risk = true;
+
+            if ($attendance_pct !== null && $attendance_pct < 75) {
+                $risk_reasons[] = "Low attendance (" . $attendance_pct . "%)";
+            }
+            if ($low_score_count > 0) {
+                $risk_reasons[] = $low_score_count . " low performance record" . ($low_score_count > 1 ? "s" : "");
+            }
+        }
+    } catch (Exception $e) {
+        // If anything fails, just don't break the dashboard
+        $is_child_at_risk = false;
+        $risk_reasons     = [];
+    }
 }
 ?>
 <!DOCTYPE html>
@@ -242,42 +300,108 @@ try {
       transform:translateY(-1px);
     }
 
-    .notif-wrapper { position:relative; }
-    .notif-dropdown {
-      position:absolute;
-      right:0;
-      top:44px;
-      width:260px;
-      max-height:300px;
-      overflow:auto;
-      background:#ffffff;
-      border-radius:16px;
-      box-shadow:0 14px 35px rgba(15,23,42,0.25);
-      padding:10px 10px 8px;
-      display:none;
-      border:1px solid var(--border-soft);
-      z-index:20;
-    }
-    .notif-dropdown.active { display:block; }
-    .notif-dropdown h4 {
-      margin:2px 4px 6px;
-      font-size:0.9rem;
-    }
-    .notif-dropdown ul {
-      list-style:none;
-      margin:0;
-      padding:0;
-      font-size:0.84rem;
-    }
-    .notif-dropdown li {
-      padding:6px 4px;
-      border-radius:8px;
-    }
-    .notif-empty {
-      padding:8px 4px;
-      font-size:0.83rem;
-      color:#9ca3af;
-    }
+    /* NOTIFICATION / NOTICE DROPDOWN */
+.notif-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.notif-dropdown {
+  position: absolute;
+  right: 0;
+  top: 48px; /* fixed spacing under bell */
+  width: 280px;
+  max-height: 320px;
+  background: #ffffff;
+  border-radius: 14px;
+  border: 1px solid var(--border-soft);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.15);
+  padding: 12px 14px;
+  display: none;
+  overflow-y: auto;
+  z-index: 50;
+  animation: fadeDown 0.18s ease-out;
+}
+
+.notif-dropdown.active {
+  display: block;
+}
+
+.notif-dropdown h4 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #78350f;
+  border-bottom: 1px dashed var(--border-soft);
+  padding-bottom: 6px;
+}
+
+.notif-dropdown ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.notif-dropdown li {
+  padding: 8px 6px;
+  font-size: 0.84rem;
+  color: #334155;
+  border-radius: 8px;
+  transition: background 0.12s, color 0.12s;
+}
+
+.notif-dropdown li:hover {
+  background: var(--accent-soft);
+  color: #92400e;
+  cursor: pointer;
+}
+
+/* empty state style */
+.notif-empty {
+  font-size: 0.82rem;
+  color: #9ca3af;
+  text-align: center;
+  padding: 10px;
+}
+
+/* optional smooth opening animation */
+@keyframes fadeDown {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* for overall fade appearance */
+@keyframes fadeDown {
+  from { opacity: 0; transform: translateY(-5px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* dropdown opening pop effect */
+@keyframes fadeDown {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Custom scrollbar for overflow */
+.notif-dropdown::-webkit-scrollbar {
+  width: 6px;
+}
+
+.notif-dropdown::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border-radius: 999px;
+}
+
+.notif-dropdown::-webkit-scrollbar-track {
+  background: #fff7e6;
+}
+
 
     /* SETTINGS DROPDOWN (dark mode / language) */
     .settings-dropdown {
@@ -490,272 +614,272 @@ try {
     body.dark-mode .data-table tbody tr:nth-child(even) {
       background:#030712;
     }
+
     /* ========== Parent Overview + Updates (dashboard-content.php) ========== */
 
-/* generic section wrapper */
-.section {
-  margin-bottom: 24px;
-}
+    /* generic section wrapper */
+    .section {
+      margin-bottom: 24px;
+    }
 
-.section-header h2 {
-  margin: 0 0 4px;
-  font-size: 1.15rem;
-  font-weight: 600;
-}
+    .section-header h2 {
+      margin: 0 0 4px;
+      font-size: 1.15rem;
+      font-weight: 600;
+    }
 
-.section-header p {
-  margin: 0 0 10px;
-  font-size: 0.86rem;
-  color: #6b7280;
-}
+    .section-header p {
+      margin: 0 0 10px;
+      font-size: 0.86rem;
+      color: #6b7280;
+    }
 
-/* stat cards row */
-.cards-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-}
+    /* stat cards row */
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
 
-/* base card style (also used below) */
-.card {
-  background: #ffffff;
-  border-radius: 16px;
-  border: 1px solid #f3e5d7;
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
-  padding: 14px 16px;
-}
+    /* base card style (also used below) */
+    .card {
+      background: #ffffff;
+      border-radius: 16px;
+      border: 1px solid #f3e5d7;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+      padding: 14px 16px;
+    }
 
-.stat-card {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-height: 96px;
-}
+    .stat-card {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-height: 96px;
+    }
 
-.stat-card.clickable {
-  cursor: pointer;
-}
+    .stat-card.clickable {
+      cursor: pointer;
+    }
 
-.stat-card.clickable:hover {
-  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.08);
-  transform: translateY(-1px);
-  transition: box-shadow 0.15s, transform 0.15s;
-}
+    .stat-card.clickable:hover {
+      box-shadow: 0 16px 32px rgba(15, 23, 42, 0.08);
+      transform: translateY(-1px);
+      transition: box-shadow 0.15s, transform 0.15s;
+    }
 
-.stat-label {
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #a16207;
-  margin-bottom: 3px;
-}
+    .stat-label {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #a16207;
+      margin-bottom: 3px;
+    }
 
-.stat-value {
-  font-size: 1.3rem;
-  font-weight: 700;
-  margin-bottom: 1px;
-}
+    .stat-value {
+      font-size: 1.3rem;
+      font-weight: 700;
+      margin-bottom: 1px;
+    }
 
-.stat-hint {
-  font-size: 0.8rem;
-  color: #6b7280;
-}
+    .stat-hint {
+      font-size: 0.8rem;
+      color: #6b7280;
+    }
 
-/* updates grid: notices + timeline side by side */
-.updates-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr);
-  gap: 16px;
-}
+    /* updates grid: notices + timeline side by side */
+    .updates-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr);
+      gap: 16px;
+    }
 
-/* card header rows (title + button / chips) */
-.card-header-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-}
+    /* card header rows (title + button / chips) */
+    .card-header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
 
-.card-title {
-  margin: 0;
-  font-size: 0.98rem;
-  font-weight: 600;
-}
+    .card-title {
+      margin: 0;
+      font-size: 0.98rem;
+      font-weight: 600;
+    }
 
-.card-sub {
-  margin: 2px 0 0;
-  font-size: 0.82rem;
-  color: #6b7280;
-}
+    .card-sub {
+      margin: 2px 0 0;
+      font-size: 0.82rem;
+      color: #6b7280;
+    }
 
-/* chips (used for “View all notices” & timeline filter) */
-.chip-group {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
+    /* chips (used for “View all notices” & timeline filter) */
+    .chip-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
 
-.chip {
-  border-radius: 999px;
-  border: 1px solid #e5e7eb;
-  background: #f9fafb;
-  padding: 6px 11px;
-  font-size: 0.82rem;
-  color: #4b5563;
-  cursor: pointer;
-  white-space: nowrap;
-}
+    .chip {
+      border-radius: 999px;
+      border: 1px solid #e5e7eb;
+      background: #f9fafb;
+      padding: 6px 11px;
+      font-size: 0.82rem;
+      color: #4b5563;
+      cursor: pointer;
+      white-space: nowrap;
+    }
 
-.chip-sm {
-  padding: 4px 9px;
-  font-size: 0.78rem;
-}
+    .chip-sm {
+      padding: 4px 9px;
+      font-size: 0.78rem;
+    }
 
-.chip:hover {
-  background: #fff5e5;
-  border-color: #fed7aa;
-  color: #92400e;
-}
+    .chip:hover {
+      background: #fff5e5;
+      border-color: #fed7aa;
+      color: #92400e;
+    }
 
-.chip.active {
-  background: #fff5e5;
-  border-color: #fbbf24;
-  color: #92400e;
-  font-weight: 600;
-}
+    .chip.active {
+      background: #fff5e5;
+      border-color: #fbbf24;
+      color: #92400e;
+      font-weight: 600;
+    }
 
-/* notices list */
-.notice-list {
-  list-style: none;
-  padding: 0;
-  margin: 4px 0 0;
-}
+    /* notices list */
+    .notice-list {
+      list-style: none;
+      padding: 0;
+      margin: 4px 0 0;
+    }
 
-.notice-list li {
-  padding: 6px 2px;
-  border-bottom: 1px dashed #f3e5d7;
-}
+    .notice-list li {
+      padding: 6px 2px;
+      border-bottom: 1px dashed #f3e5d7;
+    }
 
-.notice-list li:last-child {
-  border-bottom: none;
-}
+    .notice-list li:last-child {
+      border-bottom: none;
+    }
 
-.notice-title {
-  font-size: 0.9rem;
-  font-weight: 600;
-  margin-bottom: 1px;
-}
+    .notice-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 1px;
+    }
 
-.notice-snippet {
-  font-size: 0.8rem;
-  color: #4b5563;
-}
+    .notice-snippet {
+      font-size: 0.8rem;
+      color: #4b5563;
+    }
 
-.notice-meta {
-  font-size: 0.75rem;
-  color: #9ca3af;
-  margin-top: 2px;
-}
+    .notice-meta {
+      font-size: 0.75rem;
+      color: #9ca3af;
+      margin-top: 2px;
+    }
 
-/* shared empty row style */
-.empty-row {
-  font-size: 0.85rem;
-  color: #9ca3af;
-  padding: 6px 2px;
-}
+    /* shared empty row style */
+    .empty-row {
+      font-size: 0.85rem;
+      color: #9ca3af;
+      padding: 6px 2px;
+    }
 
-/* timeline styles */
-.timeline {
-  list-style: none;
-  padding: 0;
-  margin: 4px 0 0;
-}
+    /* timeline styles */
+    .timeline {
+      list-style: none;
+      padding: 0;
+      margin: 4px 0 0;
+    }
 
-.timeline-item {
-  display: flex;
-  position: relative;
-  padding: 8px 0 8px 0;
-}
+    .timeline-item {
+      display: flex;
+      position: relative;
+      padding: 8px 0 8px 0;
+    }
 
-.timeline-item::before {
-  content: '';
-  position: absolute;
-  left: 8px;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: #fee2b3;
-}
+    .timeline-item::before {
+      content: '';
+      position: absolute;
+      left: 8px;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: #fee2b3;
+    }
 
-.timeline-dot {
-  position: relative;
-  z-index: 1;
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  border: 2px solid #fbbf24;
-  background: #fff7e6;
-  margin-right: 10px;
-  margin-top: 4px;
-}
+    .timeline-dot {
+      position: relative;
+      z-index: 1;
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      border: 2px solid #fbbf24;
+      background: #fff7e6;
+      margin-right: 10px;
+      margin-top: 4px;
+    }
 
-.timeline-dot.grade {
-  border-color: #22c55e;
-  background: #ecfdf3;
-}
+    .timeline-dot.grade {
+      border-color: #22c55e;
+      background: #ecfdf3;
+    }
 
-.timeline-dot.event {
-  border-color: #3b82f6;
-  background: #eff6ff;
-}
+    .timeline-dot.event {
+      border-color: #3b82f6;
+      background: #eff6ff;
+    }
 
-.timeline-content {
-  font-size: 0.84rem;
-}
+    .timeline-content {
+      font-size: 0.84rem;
+    }
 
-.timeline-title {
-  font-weight: 600;
-  margin-bottom: 1px;
-}
+    .timeline-title {
+      font-weight: 600;
+      margin-bottom: 1px;
+    }
 
-.timeline-meta {
-  color: #4b5563;
-}
+    .timeline-meta {
+      color: #4b5563;
+    }
 
-.timeline-date {
-  font-size: 0.75rem;
-  color: #9ca3af;
-  margin-top: 1px;
-}
+    .timeline-date {
+      font-size: 0.75rem;
+      color: #9ca3af;
+      margin-top: 1px;
+    }
 
-/* simple error alert used at top of content when something fails */
-.alert.alert-error {
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  color: #b91c1c;
-  padding: 8px 10px;
-  border-radius: 10px;
-  font-size: 0.85rem;
-  margin-bottom: 10px;
-}
+    /* simple error alert used at top of content when something fails */
+    .alert.alert-error {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #b91c1c;
+      padding: 8px 10px;
+      border-radius: 10px;
+      font-size: 0.85rem;
+      margin-bottom: 10px;
+    }
 
-/* responsive tweaks */
-@media (max-width: 1100px) {
-  .cards-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .updates-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
+    /* responsive tweaks */
+    @media (max-width: 1100px) {
+      .cards-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .updates-grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
 
-@media (max-width: 800px) {
-  .cards-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
+    @media (max-width: 800px) {
+      .cards-grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
   </style>
 </head>
 <body>
@@ -768,26 +892,29 @@ try {
         <span>EduSphere</span>
       </div>
 
-      <nav class="nav">
-  <a href="#" class="nav-link active" data-page="dashboard-content">
-    <i class="fas fa-home"></i><span>Dashboard</span>
-  </a>
-  <a href="#" class="nav-link" data-page="child-performance">
-    <i class="fas fa-chart-line"></i><span>Child Performance</span>
-  </a>
-  <a href="#" class="nav-link" data-page="fee-status">
-    <i class="fas fa-money-bill"></i><span>Fee Status</span>
-  </a>
-
-  <!-- NEW: View all notices -->
-  <a href="#" class="nav-link" data-page="notices">
-    <i class="fas fa-bullhorn"></i><span>Notices</span>
-  </a>
-
-  <a href="#" class="nav-link" data-page="communication">
-    <i class="fas fa-envelope"></i><span>Communicate</span>
-  </a>
-</nav>
+      <div>
+        <div class="sidebar-parent-card">
+          <nav class="nav">
+            <a href="#" class="nav-link active" data-page="dashboard-content">
+              <i class="fas fa-home"></i><span>Dashboard</span>
+            </a>
+            <a href="#" class="nav-link" data-page="child-performance">
+              <i class="fas fa-chart-line"></i><span>Child Performance</span>
+            </a>
+            <a href="#" class="nav-link" data-page="fee-status">
+              <i class="fas fa-money-bill"></i><span>Fee Status</span>
+            </a>
+            <!-- NEW: View all notices -->
+            <a href="#" class="nav-link" data-page="notices">
+              <i class="fas fa-bullhorn"></i><span>Notices</span>
+            </a>
+            <a href="/edusphere/auth/logout.php" class="nav-logout">
+              <i class="fas fa-sign-out-alt"></i>
+              <span>Logout</span>
+            </a>
+          </nav>
+        </div>
+      </div>
     </div>
 
     <div>
@@ -804,10 +931,6 @@ try {
           <?php endif; ?>
         </div>
       </div>
-
-      <a href="/edusphere/auth/logout.php" class="nav logout">
-        <i class="fas fa-sign-out-alt"></i> Logout
-      </a>
     </div>
   </aside>
 
@@ -824,10 +947,40 @@ try {
           <div class="notif-wrapper">
             <button class="icon-btn" id="notificationBell" type="button" aria-label="Notifications">
               <i class="fas fa-bell"></i>
+              <?php if ($is_child_at_risk && $child_name): ?>
+                <span class="notif-badge" title="Child at academic risk">!</span>
+              <?php endif; ?>
             </button>
             <div class="notif-dropdown" id="notificationDropdown">
               <h4>Notifications</h4>
               <ul>
+                <?php if (!$child_student_id): ?>
+                  <li>No child is currently linked with this parent account.</li>
+                <?php else: ?>
+                  <?php if ($is_child_at_risk): ?>
+                    <li>
+                      <strong><?= htmlspecialchars($child_name) ?></strong> is currently
+                      <span style="color:#b91c1c;font-weight:600;">at academic risk</span>.
+                      <?php if (!empty($risk_reasons)): ?>
+                        <br/>
+                        <small>
+                          Reasons: <?= htmlspecialchars(implode(', ', $risk_reasons)) ?>.
+                        </small>
+                      <?php endif; ?>
+                      <br/>
+                      <small>View “Child Performance” for detailed breakdown and suggestions.</small>
+                    </li>
+                  <?php else: ?>
+                    <li>
+                      <strong><?= htmlspecialchars($child_name) ?></strong> is currently
+                      <span style="color:#16a34a;font-weight:600;">on track</span>.
+                      <br/>
+                      <small>Keep checking regularly to stay updated.</small>
+                    </li>
+                  <?php endif; ?>
+                <?php endif; ?>
+
+                <!-- Optional extra notifications (sample placeholders) -->
                 <li>Child attendance updated.</li>
                 <li>New message from class teacher.</li>
               </ul>
