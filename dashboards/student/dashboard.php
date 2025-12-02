@@ -6,7 +6,7 @@ if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'student') {
     exit;
 }
 
-// Canonical student identity
+// Canonical student identity (user_id from users table)
 $student_id      = (int)($_SESSION['user_id'] ?? ($_SESSION['student_id'] ?? 0));
 $student_name    = $_SESSION['student_name']  ?? 'Student';
 $student_email   = $_SESSION['student_email'] ?? 'student@example.com';
@@ -18,10 +18,21 @@ require_once '../../functions/EventManager.php';
 
 $eventManager = new EventManager($conn);
 
-/* -------------------------------------------------------
-   Helper: parse score string ("45/50", "72", "72.5/100")
-   (same helper as teacher dashboard)
---------------------------------------------------------*/
+// Fetch student_serial from students table
+$student_serial = null;
+try {
+    $stmt = $conn->prepare("
+        SELECT student_serial
+        FROM students
+        WHERE user_id = :uid
+        LIMIT 1
+    ");
+    $stmt->execute([':uid' => $student_id]);
+    $student_serial = $stmt->fetchColumn() ?: null;
+} catch (Exception $e) {
+    $student_serial = null;
+}
+
 function score_to_percent(?string $score): ?float {
     if ($score === null) return null;
     $s = trim($score);
@@ -341,7 +352,6 @@ if ($stats['unread_notices'] > 0) {
         'text' => "You have {$stats['unread_notices']} unread notice(s)."
     ];
 }
-// NEW: risk notification
 if ($studentRisk) {
     $label = $studentRisk['final'] === 'HIGH' ? 'high' : 'medium';
     $notifications[] = [
@@ -412,7 +422,7 @@ if ($studentRisk) {
       background:var(--bg-shell);
     }
 
-    /* SIDEBAR (shared style with other pages) */
+    /* SIDEBAR */
     .sidebar {
       background:var(--bg-sidebar);
       border-right:1px solid var(--border-soft);
@@ -706,7 +716,6 @@ if ($studentRisk) {
     }
     .hero-pill strong { color:var(--text-main); }
 
-    /* Risk pill shown to the flagged student */
     .risk-pill {
       margin-top:4px;
       padding:6px 10px;
@@ -925,7 +934,14 @@ if ($studentRisk) {
       <div class="main-header">
         <div class="main-header-left">
           <h2>My Student Hub</h2>
-          <p>Good to see you, <?= htmlspecialchars($student_name) ?> 👋</p>
+          <p>
+            Good to see you,
+            <?= htmlspecialchars($student_name) ?>
+            <?php if ($student_serial): ?>
+              (ID: <?= htmlspecialchars($student_serial) ?>)
+            <?php endif; ?>
+            👋
+          </p>
         </div>
         <div style="display:flex;align-items:center;gap:10px;">
           <div class="notif-wrapper">
