@@ -18,6 +18,28 @@ require_once '../../functions/EventManager.php';
 
 $eventManager = new EventManager($conn);
 
+/* -------------------------------------------------------
+   Helper: parse score string ("45/50", "72", "72.5/100")
+   (same helper as teacher dashboard)
+--------------------------------------------------------*/
+function score_to_percent(?string $score): ?float {
+    if ($score === null) return null;
+    $s = trim($score);
+    if ($s === '') return null;
+
+    if (preg_match('/^(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?$/', $s, $m)) {
+        $obt = (float)$m[1];
+        if (!empty($m[2])) {
+            $max = (float)$m[2];
+            if ($max <= 0) return null;
+            return ($obt / $max) * 100.0;
+        }
+        // No max given – assume already a percentage
+        return $obt;
+    }
+    return null;
+}
+
 // ---------- DASHBOARD STATS ----------
 $stats = [
     'upcoming_assignments' => 0,
@@ -96,7 +118,7 @@ try {
 try {
     $stmt = $conn->prepare("
         SELECT 
-          SUM(CASE WHEN status = 'present' THEN 1 ELSE 0 END) AS present_days,
+          SUM(CASE WHEN LOWER(status) = 'present' THEN 1 ELSE 0 END) AS present_days,
           COUNT(*) AS total_records
         FROM attendance
         WHERE student_id = :sid
@@ -112,6 +134,108 @@ try {
         );
     }
 } catch (Exception $e) {}
+
+/* -------------------------------------------------------
+   STUDENT RISK FLAG  (same rules as teacher dashboard)
+--------------------------------------------------------*/
+$studentRisk = null;
+
+try {
+    // Attendance %
+    $att = $stats['attendance_percent']; // may be null
+
+    // Average grade % (use score_to_percent in case of "45/50" etc.)
+    $gradePercent = null;
+    $stmt = $conn->prepare("SELECT score FROM grades WHERE student_id = :sid");
+    $stmt->execute([':sid' => $student_id]);
+    $sum = 0.0; $count = 0;
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $p = score_to_percent($row['score']);
+        if ($p === null) continue;
+        $sum += $p;
+        $count++;
+    }
+    if ($count > 0) {
+        $gradePercent = round($sum / $count, 1);
+    }
+
+    // Discipline incidents
+    $discCount = 0;
+    $stmt = $conn->prepare("
+        SELECT COUNT(*) 
+        FROM grades 
+        WHERE student_id = :sid AND category = 'Discipline'
+    ");
+    $stmt->execute([':sid' => $student_id]);
+    $discCount = (int)$stmt->fetchColumn();
+
+    // Skip if no meaningful data
+    if (!($att === null && $gradePercent === null)) {
+
+        // Logistic regression coeffs (optional)
+        $logisticCoeffs = null;
+        try {
+            $stmt = $conn->query("
+                SELECT beta0, beta1, beta2, beta3, beta4
+                FROM risk_logistic_coeffs
+                ORDER BY created_at DESC
+                LIMIT 1
+            ");
+            if ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                $logisticCoeffs = [
+                    (float)$row['beta0'],
+                    (float)$row['beta1'],
+                    (float)$row['beta2'],
+                    (float)$row['beta3'],
+                    (float)$row['beta4'],
+                ];
+            }
+        } catch (Exception $e) {
+            $logisticCoeffs = null;
+        }
+
+        // Decision-tree style rules
+        $ruleLevel = 'LOW';
+        if (($att !== null && $att < 60) || ($gradePercent !== null && $gradePercent < 40) || $discCount >= 3) {
+            $ruleLevel = 'HIGH';
+        } elseif (($att !== null && $att < 75) || ($gradePercent !== null && $gradePercent < 55) || $discCount >= 1) {
+            $ruleLevel = 'MEDIUM';
+        }
+
+        // Logistic probability
+        $prob = null;
+        if ($logisticCoeffs) {
+            [$b0,$b1,$b2,$b3,$b4] = $logisticCoeffs;
+            $x1 = $att          ?? 0.0;
+            $x2 = $gradePercent ?? 0.0;
+            $x3 = $discCount    ?? 0.0;
+            $x4 = 100.0; // placeholder assignment completion %
+            $z  = $b0 + $b1*$x1 + $b2*$x2 + $b3*$x3 + $b4*$x4;
+            $prob = 1.0 / (1.0 + exp(-$z));
+            $prob = round($prob, 3);
+        }
+
+        // Final risk
+        $final = 'LOW';
+        if ($ruleLevel === 'HIGH' || ($prob !== null && $prob >= 0.75)) {
+            $final = 'HIGH';
+        } elseif ($ruleLevel === 'MEDIUM' || ($prob !== null && $prob >= 0.50)) {
+            $final = 'MEDIUM';
+        }
+
+        if ($final !== 'LOW') {
+            $studentRisk = [
+                'final'      => $final,
+                'attendance' => $att,
+                'grade'      => $gradePercent,
+                'discipline' => $discCount,
+                'prob'       => $prob,
+            ];
+        }
+    }
+} catch (Exception $e) {
+    $studentRisk = null;
+}
 
 /** Fee summary */
 try {
@@ -217,6 +341,14 @@ if ($stats['unread_notices'] > 0) {
         'text' => "You have {$stats['unread_notices']} unread notice(s)."
     ];
 }
+// NEW: risk notification
+if ($studentRisk) {
+    $label = $studentRisk['final'] === 'HIGH' ? 'high' : 'medium';
+    $notifications[] = [
+        'type' => 'risk',
+        'text' => "You are currently flagged as {$label}-risk based on your grades, attendance and behaviour. Please review your progress and talk with your teacher."
+    ];
+}
 
 $notificationCount = count($notifications);
 
@@ -233,6 +365,9 @@ if (!empty($recommendedEvents)) {
 }
 if ($stats['attendance_percent'] !== null && $stats['attendance_percent'] < 90) {
     $initialTodos[] = "Aim for full attendance this week.";
+}
+if ($studentRisk) {
+    $initialTodos[] = "Meet your class teacher to discuss how to improve your performance.";
 }
 ?>
 <!DOCTYPE html>
@@ -491,6 +626,7 @@ if ($stats['attendance_percent'] !== null && $stats['attendance_percent'] < 90) 
     .notif-event  { background:#e3f2fd;color:#1d4ed8; }
     .notif-attend { background:#f3e8ff;color:#6b21a8; }
     .notif-notice { background:#fff8e1;color:#f59e0b; }
+    .notif-risk   { background:#fee2e2;color:#b91c1c; }
 
     .content-grid {
       margin-top:10px;
@@ -555,7 +691,7 @@ if ($stats['attendance_percent'] !== null && $stats['attendance_percent'] < 90) 
       align-items:flex-end;
       justify-content:space-between;
       gap:8px;
-      min-width:160px;
+      min-width:180px;
     }
     .hero-pill {
       background:#fff;
@@ -565,10 +701,32 @@ if ($stats['attendance_percent'] !== null && $stats['attendance_percent'] < 90) 
       box-shadow:var(--shadow-card);
       border:1px solid var(--border-soft);
       color:var(--text-muted);
-      min-width:165px;
+      min-width:180px;
       text-align:right;
     }
     .hero-pill strong { color:var(--text-main); }
+
+    /* Risk pill shown to the flagged student */
+    .risk-pill {
+      margin-top:4px;
+      padding:6px 10px;
+      border-radius:999px;
+      font-size:0.76rem;
+      font-weight:700;
+      text-align:right;
+    }
+    .risk-pill-high {
+      background:#fee2e2;
+      color:#b91c1c;
+    }
+    .risk-pill-medium {
+      background:#ffedd5;
+      color:#9a3412;
+    }
+    .risk-pill-ok {
+      background:#dcfce7;
+      color:#166534;
+    }
 
     .stats-row {
       display:grid;
@@ -788,10 +946,11 @@ if ($stats['attendance_percent'] !== null && $stats['attendance_percent'] < 90) 
                   <?php foreach ($notifications as $n): ?>
                     <?php
                       $tagClass = 'notif-notice';
-                      if ($n['type'] === 'assignment') $tagClass = 'notif-assign';
-                      elseif ($n['type'] === 'warning') $tagClass = 'notif-warning';
-                      elseif ($n['type'] === 'fee') $tagClass = 'notif-fee';
-                      elseif ($n['type'] === 'attendance') $tagClass = 'notif-attend';
+                      if ($n['type'] === 'assignment')    $tagClass = 'notif-assign';
+                      elseif ($n['type'] === 'warning')   $tagClass = 'notif-warning';
+                      elseif ($n['type'] === 'fee')       $tagClass = 'notif-fee';
+                      elseif ($n['type'] === 'attendance')$tagClass = 'notif-attend';
+                      elseif ($n['type'] === 'risk')      $tagClass = 'notif-risk';
                     ?>
                     <li>
                       <span class="notif-tag <?= $tagClass ?>"><?= strtoupper(htmlspecialchars($n['type'])) ?></span>
@@ -838,6 +997,25 @@ if ($stats['attendance_percent'] !== null && $stats['attendance_percent'] < 90) 
                 <strong><?= $stats['attendance_percent'] !== null ? $stats['attendance_percent'].'%' : '—' ?></strong><br/>
                 Unread notices:
                 <strong><?= $stats['unread_notices'] ?></strong>
+              </div>
+              <?php
+                $riskClass = 'risk-pill-ok';
+                $riskText  = 'You are currently on track.';
+                if ($studentRisk) {
+                    if ($studentRisk['final'] === 'HIGH') {
+                        $riskClass = 'risk-pill-high';
+                        $riskText  = 'You are flagged HIGH risk. Please talk with your teacher.';
+                    } else {
+                        $riskClass = 'risk-pill-medium';
+                        $riskText  = 'You are flagged MEDIUM risk. Focus on improving your progress.';
+                    }
+                }
+              ?>
+              <div class="risk-pill <?= $riskClass ?>">
+                <?= htmlspecialchars($riskText) ?>
+                <?php if ($studentRisk && $studentRisk['prob'] !== null): ?>
+                  <br><span style="font-weight:400;">Model probability: <?= number_format($studentRisk['prob']*100,1) ?>%</span>
+                <?php endif; ?>
               </div>
             </div>
           </div>

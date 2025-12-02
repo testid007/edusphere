@@ -13,11 +13,28 @@ $student_name    = $_SESSION['student_name']  ?? 'Student';
 $student_email   = $_SESSION['student_email'] ?? 'student@example.com';
 $student_avatar  = '../../assets/img/user.jpg';
 
-// Allowed categories for filter dropdown
+/* ---------------- Helper: convert "45/50" -> percent ---------------- */
+function score_to_percent(?string $score): ?float {
+    if ($score === null) return null;
+    $s = trim($score);
+    if ($s === '') return null;
+
+    if (preg_match('/^(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?$/', $s, $m)) {
+        $obt = (float)$m[1];
+        if (!empty($m[2])) {
+            $max = (float)$m[2];
+            if ($max <= 0) return null;
+            return ($obt / $max) * 100.0;
+        }
+        return $obt; // already percentage
+    }
+    return null;
+}
+
+/* ---------------- Fetch detailed results (with optional category filter) --------- */
 $allowed_categories = ['Assignment', 'Exam', 'Discipline', 'Classroom Activity'];
 $selected_category  = $_GET['category'] ?? 'All';
 
-// Base query
 $sql = "SELECT category, title, score, grade, comments, date_added 
         FROM grades 
         WHERE student_id = :student_id";
@@ -33,13 +50,15 @@ $stmt = $conn->prepare($sql);
 $stmt->execute($params);
 $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// stats + category averages
+/* ---------------- Overall stats + per-category averages ---------------- */
 $stats = [
     'avg_score'      => null,
     'total_records'  => 0,
     'best_category'  => null,
     'weak_category'  => null,
 ];
+
+$categoryAverages = [];
 
 try {
     $stmt = $conn->prepare("
@@ -56,7 +75,7 @@ try {
         $stats['total_records'] = (int)$row['total_rows'];
     }
 
-    // per-category averages
+    // per-category averages (for strengths / weaknesses and chart)
     $stmt = $conn->prepare("
         SELECT category, AVG(score) AS avg_score
         FROM grades
@@ -64,11 +83,11 @@ try {
         GROUP BY category
     ");
     $stmt->execute([':sid' => $student_id]);
-    $cats = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $categoryAverages = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     $best = null;
     $weak = null;
-    foreach ($cats as $c) {
+    foreach ($categoryAverages as $c) {
         $score = (float)$c['avg_score'];
         if ($best === null || $score > $best['score']) {
             $best = ['name' => $c['category'], 'score' => $score];
@@ -80,6 +99,171 @@ try {
     if ($best) $stats['best_category'] = $best;
     if ($weak) $stats['weak_category'] = $weak;
 } catch (Exception $e) {}
+
+/* ---------------- Attendance % (needed for risk) ---------------- */
+$attendancePercent = null;
+try {
+    $stmt = $conn->prepare("
+        SELECT 
+          SUM(CASE WHEN LOWER(status) = 'present' THEN 1 ELSE 0 END) AS present_days,
+          COUNT(*) AS total_records
+        FROM attendance
+        WHERE student_id = :sid
+    ");
+    $stmt->execute([':sid' => $student_id]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($row && (int)$row['total_records'] > 0) {
+        $attendancePercent = round(
+            $row['present_days'] / $row['total_records'] * 100,
+            1
+        );
+    }
+} catch (Exception $e) {
+    $attendancePercent = null;
+}
+
+/* ---------------- Risk computation (same philosophy as dashboard) ------------- */
+$studentRisk = null;
+$gradePercent = null;
+$discCount    = 0;
+
+// gradePercent from all scores using score_to_percent
+try {
+    $stmt = $conn->prepare("SELECT score FROM grades WHERE student_id = :sid");
+    $stmt->execute([':sid' => $student_id]);
+    $sum = 0.0; $count = 0;
+    while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $p = score_to_percent($r['score']);
+        if ($p === null) continue;
+        $sum += $p;
+        $count++;
+    }
+    if ($count > 0) {
+        $gradePercent = round($sum / $count, 1);
+    }
+
+    // discipline incidents
+    $stmt = $conn->prepare("
+        SELECT COUNT(*) 
+        FROM grades 
+        WHERE student_id = :sid AND category = 'Discipline'
+    ");
+    $stmt->execute([':sid' => $student_id]);
+    $discCount = (int)$stmt->fetchColumn();
+} catch (Exception $e) {}
+
+try {
+    if (!($attendancePercent === null && $gradePercent === null)) {
+
+        // Optional logistic coefficients
+        $logisticCoeffs = null;
+        try {
+            $stmt = $conn->query("
+                SELECT beta0, beta1, beta2, beta3, beta4
+                FROM risk_logistic_coeffs
+                ORDER BY created_at DESC
+                LIMIT 1
+            ");
+            if ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                $logisticCoeffs = [
+                    (float)$row['beta0'],
+                    (float)$row['beta1'],
+                    (float)$row['beta2'],
+                    (float)$row['beta3'],
+                    (float)$row['beta4'],
+                ];
+            }
+        } catch (Exception $e) {
+            $logisticCoeffs = null;
+        }
+
+        // Rule-based level
+        $ruleLevel = 'LOW';
+        if (($attendancePercent !== null && $attendancePercent < 60) ||
+            ($gradePercent !== null && $gradePercent < 40) ||
+            $discCount >= 3) {
+            $ruleLevel = 'HIGH';
+        } elseif (($attendancePercent !== null && $attendancePercent < 75) ||
+                  ($gradePercent !== null && $gradePercent < 55) ||
+                  $discCount >= 1) {
+            $ruleLevel = 'MEDIUM';
+        }
+
+        // Logistic probability
+        $prob = null;
+        if ($logisticCoeffs) {
+            [$b0,$b1,$b2,$b3,$b4] = $logisticCoeffs;
+            $x1 = $attendancePercent ?? 0.0;
+            $x2 = $gradePercent      ?? 0.0;
+            $x3 = $discCount         ?? 0.0;
+            $x4 = 100.0; // placeholder: assignment completion %
+            $z  = $b0 + $b1*$x1 + $b2*$x2 + $b3*$x3 + $b4*$x4;
+            $prob = 1.0 / (1.0 + exp(-$z));
+            $prob = round($prob, 3);
+        }
+
+        $final = 'LOW';
+        if ($ruleLevel === 'HIGH' || ($prob !== null && $prob >= 0.75)) {
+            $final = 'HIGH';
+        } elseif ($ruleLevel === 'MEDIUM' || ($prob !== null && $prob >= 0.50)) {
+            $final = 'MEDIUM';
+        }
+
+        if ($final !== 'LOW') {
+            // Build “weak spots” explanations
+            $weakSpots = [];
+            if ($attendancePercent !== null && $attendancePercent < 75) {
+                $weakSpots[] = "Low attendance ({$attendancePercent}%).";
+            }
+            if ($gradePercent !== null && $gradePercent < 60) {
+                $weakSpots[] = "Overall marks are below 60% (avg {$gradePercent}%).";
+            }
+            if ($stats['weak_category'] && $stats['weak_category']['score'] < 65) {
+                $wcName  = $stats['weak_category']['name'];
+                $wcScore = round($stats['weak_category']['score'],1);
+                $weakSpots[] = "{$wcName} results are low (avg {$wcScore}%).";
+            }
+            if ($discCount > 0) {
+                $weakSpots[] = "There are {$discCount} discipline record(s).";
+            }
+
+            if (empty($weakSpots)) {
+                $weakSpots[] = "Some recent results are fluctuating. Try to maintain consistent performance.";
+            }
+
+            // Suggestions
+            $suggestions = [];
+            if ($attendancePercent !== null && $attendancePercent < 75) {
+                $suggestions[] = "Aim for at least 90% attendance over the next month.";
+            }
+            if ($gradePercent !== null && $gradePercent < 60) {
+                $suggestions[] = "Set a goal to push your average above 65% by focusing on weak chapters.";
+            }
+            if ($stats['weak_category']) {
+                $wcName = $stats['weak_category']['name'];
+                $suggestions[] = "Review all feedback under '{$wcName}' and talk to your teacher about doubts.";
+            }
+            if ($discCount > 0) {
+                $suggestions[] = "Avoid behaviour notes. Sit in the front and avoid distractions during class.";
+            }
+            if (empty($suggestions)) {
+                $suggestions[] = "Keep tracking this page after every test to ensure your risk level goes down.";
+            }
+
+            $studentRisk = [
+                'final'        => $final,
+                'attendance'   => $attendancePercent,
+                'grade'        => $gradePercent,
+                'discipline'   => $discCount,
+                'prob'         => $prob,
+                'weak_spots'   => $weakSpots,
+                'suggestions'  => $suggestions,
+            ];
+        }
+    }
+} catch (Exception $e) {
+    $studentRisk = null;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -92,7 +276,6 @@ try {
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <style>
-    /* shell same as dashboard */
     :root{
       --bg-page:#f5eee9;
       --bg-shell:#fdfcfb;
@@ -229,7 +412,7 @@ try {
       border-radius:999px;
       background:#fff7ea;
       border:1px solid #fed7aa;
-      min-width:180px;
+      min-width:200px;
     }
     .header-avatar img{
       width:32px;
@@ -245,6 +428,71 @@ try {
     .header-avatar .role{
       font-size:0.78rem;
       color:#c05621;
+    }
+
+    /* risk card + pills */
+    .risk-card{
+      background:#fff;
+      border-radius:16px;
+      padding:14px 16px;
+      box-shadow:var(--shadow-card);
+      border:1px solid var(--border-soft);
+      margin-bottom:14px;
+      display:grid;
+      grid-template-columns:1.2fr 1.4fr;
+      gap:14px;
+      align-items:flex-start;
+    }
+    .risk-title{
+      font-size:0.9rem;
+      font-weight:600;
+      margin-bottom:4px;
+      text-transform:uppercase;
+      letter-spacing:0.05em;
+      color:#9a3412;
+    }
+    .risk-pill{
+      display:inline-block;
+      padding:4px 10px;
+      border-radius:999px;
+      font-size:0.78rem;
+      font-weight:700;
+      text-transform:uppercase;
+      letter-spacing:0.05em;
+    }
+    .risk-pill-high{
+      background:#fee2e2;
+      color:#b91c1c;
+    }
+    .risk-pill-medium{
+      background:#ffedd5;
+      color:#9a3412;
+    }
+    .risk-pill-ok{
+      background:#dcfce7;
+      color:#166534;
+    }
+    .risk-meta{
+      margin-top:6px;
+      font-size:0.82rem;
+      color:#4b5563;
+    }
+    .risk-meta span{
+      display:inline-block;
+      margin-right:10px;
+    }
+    .risk-list{
+      margin:4px 0 0;
+      padding-left:18px;
+      font-size:0.82rem;
+      color:#4b5563;
+    }
+    .risk-list li + li{margin-top:2px;}
+    .risk-suggestions{
+      margin:2px 0 0;
+      padding-left:18px;
+      font-size:0.82rem;
+      color:#374151;
     }
 
     .stats-row{
@@ -364,6 +612,7 @@ try {
       .app-shell{grid-template-columns:220px 1fr;}
       .stats-row{grid-template-columns:repeat(2,minmax(0,1fr));}
       .layout-grid{grid-template-columns:1fr;}
+      .risk-card{grid-template-columns:1fr;}
     }
     @media(max-width:800px){
       .app-shell{grid-template-columns:1fr;}
@@ -405,7 +654,7 @@ try {
       <div class="main-header">
         <div class="main-header-left">
           <h2>My Results</h2>
-          <p>Review your performance and identify strengths & improvements.</p>
+          <p>Review your performance, see risk level and know exactly where to improve.</p>
         </div>
         <div class="header-avatar">
           <img src="<?= htmlspecialchars($student_avatar) ?>" alt="Student" />
@@ -416,7 +665,86 @@ try {
         </div>
       </div>
 
-      <!-- STATS -->
+      <!-- RISK & INSIGHTS CARD -->
+      <?php
+        $pillClass = 'risk-pill-ok';
+        $pillText  = 'On track';
+        $leadText  = 'Your current performance looks stable. Keep monitoring this page after every test.';
+        if ($studentRisk) {
+            if ($studentRisk['final'] === 'HIGH') {
+                $pillClass = 'risk-pill-high';
+                $pillText  = 'High Risk';
+                $leadText  = 'You are currently at high risk and need immediate improvement in the areas below.';
+            } else {
+                $pillClass = 'risk-pill-medium';
+                $pillText  = 'Medium Risk';
+                $leadText  = 'You are at medium risk. Focus on the areas below to move back on track.';
+            }
+        }
+      ?>
+      <div class="risk-card">
+        <div>
+          <div class="risk-title">At-Risk Status</div>
+          <span class="risk-pill <?= $pillClass ?>"><?= htmlspecialchars($pillText) ?></span>
+          <p style="margin:8px 0 6px;font-size:0.86rem;color:var(--text-muted);">
+            <?= htmlspecialchars($leadText) ?>
+          </p>
+          <div class="risk-meta">
+            <span>Overall avg:
+              <strong><?= $gradePercent !== null ? $gradePercent.'%' : '—' ?></strong>
+            </span>
+            <span>Attendance:
+              <strong><?= $attendancePercent !== null ? $attendancePercent.'%' : '—' ?></strong>
+            </span>
+            <span>Discipline:
+              <strong><?= $discCount ?></strong> record<?= $discCount === 1 ? '' : 's' ?>
+            </span>
+            <?php if ($studentRisk && $studentRisk['prob'] !== null): ?>
+              <br><span>Model probability:
+                <strong><?= number_format($studentRisk['prob'] * 100, 1) ?>%</strong>
+              </span>
+            <?php endif; ?>
+          </div>
+          <?php if ($stats['weak_category']): ?>
+            <div style="margin-top:6px;font-size:0.84rem;color:#4b5563;">
+              Weakest area:
+              <strong><?= htmlspecialchars($stats['weak_category']['name']) ?></strong>
+              (avg <?= round($stats['weak_category']['score'],1) ?>%)
+            </div>
+          <?php endif; ?>
+        </div>
+        <div>
+          <?php if ($studentRisk): ?>
+            <div style="font-size:0.84rem;color:#374151;margin-bottom:4px;font-weight:600;">
+              Why you’re flagged
+            </div>
+            <ul class="risk-list">
+              <?php foreach ($studentRisk['weak_spots'] as $w): ?>
+                <li><?= htmlspecialchars($w) ?></li>
+              <?php endforeach; ?>
+            </ul>
+            <div style="font-size:0.84rem;color:#374151;margin-top:8px;font-weight:600;">
+              Suggested next steps
+            </div>
+            <ul class="risk-suggestions">
+              <?php foreach ($studentRisk['suggestions'] as $s): ?>
+                <li><?= htmlspecialchars($s) ?></li>
+              <?php endforeach; ?>
+            </ul>
+          <?php else: ?>
+            <div style="font-size:0.84rem;color:#374151;">
+              You’re not currently flagged as at-risk. Keep:
+              <ul class="risk-suggestions">
+                <li>Submitting assignments on time.</li>
+                <li>Maintaining high attendance.</li>
+                <li>Checking feedback and improving weak chapters early.</li>
+              </ul>
+            </div>
+          <?php endif; ?>
+        </div>
+      </div>
+
+      <!-- TOP STATS -->
       <div class="stats-row">
         <div class="stat-card">
           <div class="stat-label">Overall Average</div>
@@ -442,7 +770,7 @@ try {
             <?= $stats['weak_category'] ? htmlspecialchars($stats['weak_category']['name']) : '—' ?>
           </div>
           <div class="stat-sub">
-            <?= $stats['weak_category'] ? 'Avg ' . round($stats['weak_category']['score'],1) . '%' : 'Do well in all categories so far' ?>
+            <?= $stats['weak_category'] ? 'Avg ' . round($stats['weak_category']['score'],1) . '%' : 'Doing well in all categories so far' ?>
           </div>
         </div>
       </div>
@@ -514,8 +842,8 @@ try {
           <div style="margin-top:14px;font-size:0.86rem;color:var(--text-muted);">
             <strong>How to use this:</strong>
             <ul style="padding-left:18px;margin:6px 0 0;">
-              <li>Subjects closer to 80–100% are your strong zones — keep revising to maintain them.</li>
-              <li>Anything below 60% needs extra practice or discussion with your teacher.</li>
+              <li>Bars near 80–100% are your strong zones — keep revising to maintain them.</li>
+              <li>Anything below 60% is a warning: re-read notes, practice extra questions and ask doubts.</li>
               <li>After each exam, quickly scan this panel to see if your overall trend is improving.</li>
             </ul>
           </div>
@@ -526,36 +854,10 @@ try {
 </div>
 
 <script>
-  // Build category chart from PHP data
+  // Category-wise averages chart
   (function() {
-    const data = <?= json_encode($stats['best_category'] || $stats['weak_category'] ? null : null); ?>;
-  })();
-
-  (function() {
-    const raw = <?= json_encode($stats['best_category'] || $stats['weak_category'] ? null : null); ?>;
-  })();
-</script>
-
-<script>
-  (function() {
-    // We'll reconstruct averages again just for chart through PHP
-    const averages = <?= json_encode(
-      (function($conn,$student_id){
-        try{
-          $stmt = $conn->prepare("
-              SELECT category, AVG(score) AS avg_score
-              FROM grades
-              WHERE student_id = :sid
-              GROUP BY category
-          ");
-          $stmt->execute([':sid'=>$student_id]);
-          return $stmt->fetchAll(PDO::FETCH_ASSOC);
-        }catch(Exception $e){ return []; }
-      })($conn,$student_id),
-      JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES
-    ); ?>;
-
-    const canvas = document.getElementById('categoryChart');
+    const averages = <?= json_encode($categoryAverages, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) ?>;
+    const canvas   = document.getElementById('categoryChart');
     if (!canvas || !averages || !averages.length) return;
 
     const labels = averages.map(r => r.category);

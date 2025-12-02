@@ -13,12 +13,18 @@ function h($v) {
     return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
 }
 
-$admin_name  = $_SESSION['admin_name']  ?? 'Main';
-$admin_email = $_SESSION['admin_email'] ?? 'admin@example.com';
+$admin_name   = $_SESSION['admin_name']  ?? 'Main';
+$admin_email  = $_SESSION['admin_email'] ?? 'admin@example.com';
 $admin_avatar = '../../assets/img/user.jpg';
 
 $success = $_GET['success'] ?? '';
 $error   = $_GET['error']   ?? '';
+
+/* ---------------- PAGE META (for layout reuse) ---------------- */
+$page_title    = 'Fees & Payments';
+$page_subtitle = 'Generate class-wise invoices and record student payments.';
+$breadcrumb    = 'Admin > Fees';
+$active_nav    = 'fees'; // dashboard | manage-users | create-fee | fees | reports | schedule | schedule-view | events
 
 function redirect_with_msg(array $params = []): void {
     $q = http_build_query($params);
@@ -26,7 +32,8 @@ function redirect_with_msg(array $params = []): void {
     exit;
 }
 
-/* ---------- HANDLE POST ACTIONS ---------- */
+/* ---------------- HANDLE POST ACTIONS ---------------- */
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
@@ -154,7 +161,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-/* ---------- FETCH DATA FOR DISPLAY ---------- */
+/* ---------------- FETCH DATA FOR DISPLAY ---------------- */
 
 // active fee structures for dropdown
 $feeStructures = [];
@@ -204,7 +211,7 @@ try {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Fees & Payments | EduSphere Admin</title>
+  <title><?= h($page_title) ?> | EduSphere Admin</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="../../assets/css/dashboard.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
@@ -483,14 +490,14 @@ try {
         <span>EduSphere</span>
       </div>
       <nav class="nav">
-        <a href="dashboard.php"><i class="fas fa-th-large"></i> Dashboard</a>
-        <a href="manage-users.php"><i class="fas fa-users"></i> Manage Users</a>
-        <a href="create-fee.php"><i class="fas fa-layer-group"></i> Create Fee</a>
-        <a href="fees.php" class="active"><i class="fas fa-file-invoice-dollar"></i> Fees &amp; Payments</a>
-        <a href="reports.php"><i class="fas fa-chart-line"></i> View Reports</a>
-        <a href="schedule.php"><i class="fas fa-calendar-alt"></i> Manage Schedule</a>
-        <a href="schedule-view.php"><i class="fas fa-table"></i> Schedule View</a>
-        <a href="events.php"><i class="fas fa-bullhorn"></i> Manage Events</a>
+        <a href="dashboard.php"      class="<?= $active_nav === 'dashboard'      ? 'active' : '' ?>"><i class="fas fa-th-large"></i> Dashboard</a>
+        <a href="manage-users.php"  class="<?= $active_nav === 'manage-users'   ? 'active' : '' ?>"><i class="fas fa-users"></i> Manage Users</a>
+        <a href="create-fee.php"    class="<?= $active_nav === 'create-fee'     ? 'active' : '' ?>"><i class="fas fa-layer-group"></i> Create Fee</a>
+        <a href="fees.php"          class="<?= $active_nav === 'fees'           ? 'active' : '' ?>"><i class="fas fa-file-invoice-dollar"></i> Fees &amp; Payments</a>
+        <a href="reports.php"       class="<?= $active_nav === 'reports'        ? 'active' : '' ?>"><i class="fas fa-chart-line"></i> View Reports</a>
+        <a href="schedule.php"      class="<?= $active_nav === 'schedule'       ? 'active' : '' ?>"><i class="fas fa-calendar-alt"></i> Manage Schedule</a>
+        <a href="schedule-view.php" class="<?= $active_nav === 'schedule-view'  ? 'active' : '' ?>"><i class="fas fa-table"></i> Schedule View</a>
+        <a href="events.php"        class="<?= $active_nav === 'events'         ? 'active' : '' ?>"><i class="fas fa-bullhorn"></i> Manage Events</a>
         <a href="/edusphere/auth/logout.php" class="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
       </nav>
     </div>
@@ -508,8 +515,8 @@ try {
     <div class="main-inner">
       <div class="main-header">
         <div class="main-header-left">
-          <h2>Fees &amp; Payments</h2>
-          <p>Generate class-wise invoices and record student payments.</p>
+          <h2><?= h($page_title) ?></h2>
+          <p><?= h($page_subtitle) ?></p>
         </div>
         <div class="header-avatar">
           <img src="<?= h($admin_avatar) ?>" alt="Admin" />
@@ -527,7 +534,7 @@ try {
             <h3>Fees &amp; Payments</h3>
             <p>Class fee invoices and payment recording from one place.</p>
           </div>
-          <span class="fees-badge">Admin &gt; Fees</span>
+          <span class="fees-badge"><?= h($breadcrumb) ?></span>
         </div>
 
         <?php if ($success): ?>

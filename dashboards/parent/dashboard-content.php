@@ -10,7 +10,7 @@ if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'parent') {
 $parent_id = (int)$_SESSION['user_id'];
 
 /**
- * Convert letter grades to a numeric value for averaging.
+ * Convert letter grades to a numeric value for averaging (GPA-style).
  */
 function gradeToNumber($grade) {
     $map = [
@@ -19,8 +19,28 @@ function gradeToNumber($grade) {
         'C+' => 2.3, 'C' => 2.0, 'C-' => 1.7,
         'D+' => 1.3, 'D' => 1.0, 'F' => 0,
     ];
-    $g = strtoupper(trim($grade));
+    $g = strtoupper(trim((string)$grade));
     return $map[$g] ?? (is_numeric($g) ? (float)$g : null);
+}
+
+/**
+ * Convert a score string like "45/50" or "78" to a percentage (0–100).
+ */
+function scoreToPercent(?string $score): ?float {
+    if ($score === null) return null;
+    $s = trim($score);
+    if ($s === '') return null;
+
+    if (preg_match('/^(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?$/', $s, $m)) {
+        $obt = (float)$m[1];
+        if (!empty($m[2])) {
+            $max = (float)$m[2];
+            if ($max <= 0) return null;
+            return ($obt / $max) * 100.0;
+        }
+        return $obt; // already a percentage
+    }
+    return null;
 }
 
 // ---------- DEFAULT / FALLBACK VALUES ----------
@@ -33,6 +53,14 @@ $child_name        = 'Child';
 $child_class       = null;
 $recentNotices     = [];
 $timelineItems     = [];
+
+// risk related
+$gradePercent        = null;
+$disciplineIncidents = 0;
+$riskLevelLabel      = 'On Track';
+$riskSeverity        = 'low';   // 'low' | 'medium' | 'high'
+$riskReasonText      = 'Doing well overall. Keep supporting regular study habits.';
+$riskTips            = [];
 
 try {
     // 1) Find the child (student) linked to this parent
@@ -54,15 +82,15 @@ try {
         throw new Exception('No child linked to this parent account.');
     }
 
-    $student_id   = (int)$row['student_id'];
-    $child_name   = $row['full_name'];
-    $child_class  = $row['class_name'];
+    $student_id  = (int)$row['student_id'];
+    $child_name  = $row['full_name'];
+    $child_class = $row['class_name'];
     $_SESSION['child_student_id'] = $student_id; // for other parent pages
 
-    // 2) Attendance percentage (1 row per day; status = 'Present' or similar)
+    // 2) Attendance percentage (1 row per day; status = 'present')
     $stmt = $conn->prepare("
         SELECT 
-            SUM(CASE WHEN status = 'Present' THEN 1 ELSE 0 END) AS present,
+            SUM(CASE WHEN LOWER(status) = 'present' THEN 1 ELSE 0 END) AS present,
             COUNT(*) AS total
         FROM attendance
         WHERE student_id = :sid
@@ -76,86 +104,160 @@ try {
         $attendance = 0;
     }
 
-    // 3) Fees (from fees table; here we just show total as "paid" and remaining = 0)
-    $stmt = $conn->prepare("
-        SELECT SUM(amount) AS total_paid
-        FROM fees
-        WHERE student_id = :sid
-    ");
-    $stmt->execute([':sid' => $student_id]);
-    $total_paid    = (float)($stmt->fetchColumn() ?? 0);
-    $remaining_fee = 0.00; // until you add a "total expected fee" table
+    // 3) Fees using fee_invoices + fee_payments
+    $total_invoiced = 0.0;
+    $total_paid     = 0.0;
 
-    // 4) Grades -> numeric average and GPA-like display
+    try {
+        $stmt = $conn->prepare("
+            SELECT COALESCE(SUM(total_amount), 0) AS total_invoiced
+            FROM fee_invoices
+            WHERE student_id = :sid
+        ");
+        $stmt->execute([':sid' => $student_id]);
+        $total_invoiced = (float)($stmt->fetchColumn() ?? 0);
+
+        $stmt = $conn->prepare("
+            SELECT COALESCE(SUM(fp.amount), 0) AS total_paid
+            FROM fee_payments fp
+            JOIN fee_invoices fi ON fp.invoice_id = fi.id
+            WHERE fi.student_id = :sid
+        ");
+        $stmt->execute([':sid' => $student_id]);
+        $total_paid = (float)($stmt->fetchColumn() ?? 0);
+
+        $remaining_fee = max(0, $total_invoiced - $total_paid);
+    } catch (Exception $eFee) {
+        $total_invoiced = 0.0;
+        $total_paid     = 0.0;
+        $remaining_fee  = 0.0;
+    }
+
+    // 4) Grades -> GPA-like average AND numeric percentage from scores
     $stmt = $conn->prepare("
-        SELECT grade
+        SELECT grade, score, category
         FROM grades
         WHERE student_id = :sid
     ");
     $stmt->execute([':sid' => $student_id]);
-    $grades = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    $gradeRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $numSum = 0;
-    $numCnt = 0;
-    foreach ($grades as $grade) {
-        $n = gradeToNumber($grade);
+    $numSumGpa   = 0;
+    $numCntGpa   = 0;
+    $numSumScore = 0;
+    $numCntScore = 0;
+
+    foreach ($gradeRows as $g) {
+        // GPA style
+        $n = gradeToNumber($g['grade']);
         if ($n !== null) {
-            $numSum += $n;
-            $numCnt++;
+            $numSumGpa += $n;
+            $numCntGpa++;
+        }
+
+        // percentage from score field (for risk)
+        $p = scoreToPercent($g['score'] ?? null);
+        if ($p !== null) {
+            $numSumScore += $p;
+            $numCntScore++;
+        }
+
+        // discipline count
+        if (isset($g['category']) && $g['category'] === 'Discipline') {
+            $disciplineIncidents++;
         }
     }
 
-    if ($numCnt > 0) {
-        $gpa          = $numSum / $numCnt;              // 0 – 4.3-ish
-        $gradePercent = min(100, round(($gpa / 4.3) * 100, 2));
+    if ($numCntGpa > 0) {
+        $gpa              = $numSumGpa / $numCntGpa;   // 0 – 4.3-ish
         $avg_grade_display = round($gpa, 2) . ' GPA';
     } else {
-        $gradePercent      = null;
+        $gpa              = null;
         $avg_grade_display = 'N/A';
     }
 
+    if ($numCntScore > 0) {
+        $gradePercent = round($numSumScore / $numCntScore, 1);  // 0–100
+    } else {
+        $gradePercent = null;
+    }
+
     // 5) Overall child progress (simple average of attendance & grade % if available)
-    if (isset($gradePercent) && $gradePercent !== null) {
+    if ($gradePercent !== null) {
         $child_progress = round(($attendance + $gradePercent) / 2, 1);
     } else {
         $child_progress = $attendance;
     }
 
-    // 6) Recent "notices" from school = recent EVENTS for this child's class (or global)
-    try {
-        if ($child_class) {
-            $stmt = $conn->prepare("
-                SELECT 
-                    e.id,
-                    e.title,
-                    e.description,
-                    e.event_date
-                FROM events e
-                WHERE 
-                    (e.class_name IS NULL OR e.class_name = '' OR e.class_name = :class OR e.class_name = 'All')
-                ORDER BY e.event_date DESC
-                LIMIT 3
-            ");
-            $stmt->execute([':class' => $child_class]);
+    // 6) At-Risk model for parent view (same spirit as teacher dashboard)
+    if ($gradePercent === null && $attendance == 0 && $disciplineIncidents === 0) {
+        // no data yet
+        $riskSeverity   = 'low';
+        $riskLevelLabel = 'On Track';
+        $riskReasonText = 'Not enough data yet to calculate risk. Check again after a few classes and assessments.';
+    } else {
+        // Determine severity
+        if (($attendance < 60 && $attendance > 0) ||
+            ($gradePercent !== null && $gradePercent < 40) ||
+            $disciplineIncidents >= 3) {
+            $riskSeverity   = 'high';
+            $riskLevelLabel = 'High Risk';
+        } elseif (($attendance < 75 && $attendance > 0) ||
+                  ($gradePercent !== null && $gradePercent < 55) ||
+                  $disciplineIncidents >= 1) {
+            $riskSeverity   = 'medium';
+            $riskLevelLabel = 'Medium Risk';
         } else {
-            $stmt = $conn->query("
-                SELECT id, title, description, event_date
-                FROM events
-                ORDER BY event_date DESC
-                LIMIT 3
-            ");
+            $riskSeverity   = 'low';
+            $riskLevelLabel = 'On Track';
         }
+
+        // Reasons
+        $reasons = [];
+        if ($attendance > 0 && $attendance < 75) {
+            $reasons[] = "attendance is " . $attendance . "%";
+            $riskTips[] = "Encourage regular class attendance and avoid unnecessary absences.";
+        }
+        if ($gradePercent !== null && $gradePercent < 60) {
+            $reasons[] = "average score is " . $gradePercent . "%";
+            $riskTips[] = "Help your child revise weak subjects and complete assignments on time.";
+        }
+        if ($disciplineIncidents > 0) {
+            $reasons[] = $disciplineIncidents . " discipline record" . ($disciplineIncidents === 1 ? '' : 's');
+            $riskTips[] = "Discuss classroom behaviour and school rules calmly with your child.";
+        }
+
+        if (!empty($reasons)) {
+            $riskReasonText = "Areas to watch: " . implode(', ', $reasons) . ".";
+        } elseif ($riskSeverity === 'low') {
+            $riskReasonText = "Balanced attendance and marks. Keep up the current routine.";
+        }
+    }
+
+    // 7) Recent "notices" from school = recent ACTIVE EVENTS
+    try {
+        $stmt = $conn->prepare("
+            SELECT 
+                e.id,
+                e.title,
+                e.description,
+                e.event_date
+            FROM events e
+            WHERE e.is_active = 1
+            ORDER BY e.event_date DESC, e.start_time DESC
+            LIMIT 3
+        ");
+        $stmt->execute();
         $recentNotices = $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (Exception $eNotices) {
         $recentNotices = [];
     }
 
-    // 7) Recent activity timeline (grades + event participation)
+    // 8) Recent activity timeline (grades + event participation)
     $gradeTimeline = [];
     $eventTimeline = [];
 
     try {
-        // last 5 graded items
         $stmt = $conn->prepare("
             SELECT 
                 g.title,
@@ -175,7 +277,6 @@ try {
     }
 
     try {
-        // last 5 events where the child has some participation status
         $stmt = $conn->prepare("
             SELECT 
                 e.title,
@@ -197,7 +298,6 @@ try {
         $eventTimeline = [];
     }
 
-    // Merge grades + events into one array for the timeline
     foreach ($gradeTimeline as $g) {
         $timelineItems[] = [
             'type' => 'grade',
@@ -214,7 +314,7 @@ try {
 
     foreach ($eventTimeline as $e) {
         $labelStatus = ucwords(str_replace('_', ' ', $e['status'] ?? ''));
-        $timeLabel   = trim(($e['start_time'] ?? ''));
+        $timeLabel   = trim((string)($e['start_time'] ?? ''));
 
         $timelineItems[] = [
             'type' => 'event',
@@ -230,16 +330,14 @@ try {
         ];
     }
 
-    // Sort timeline by date DESC
     usort($timelineItems, function($a, $b) {
-        return strcmp($b['date'], $a['date']);
+        return strcmp($b['date'], $a['date']); // DESC
     });
 
 } catch (Exception $e) {
     echo '<div class="alert alert-error">'
         . htmlspecialchars($e->getMessage())
         . '</div>';
-    // fallback values already set
 }
 ?>
 
@@ -250,6 +348,29 @@ try {
   </div>
 
   <div class="cards-grid">
+    <!-- AT-RISK STATUS CARD -->
+    <div class="card stat-card clickable" data-open-page="child-performance">
+      <div class="stat-label">At-Risk Status</div>
+      <div class="stat-value">
+        <?php if ($riskSeverity === 'high'): ?>
+          🔴 <?= htmlspecialchars($riskLevelLabel) ?>
+        <?php elseif ($riskSeverity === 'medium'): ?>
+          🟠 <?= htmlspecialchars($riskLevelLabel) ?>
+        <?php else: ?>
+          🟢 <?= htmlspecialchars($riskLevelLabel) ?>
+        <?php endif; ?>
+      </div>
+      <div class="stat-hint">
+        <?= htmlspecialchars($riskReasonText) ?>
+      </div>
+      <?php if (!empty($riskTips)): ?>
+        <div style="margin-top:4px;font-size:0.78rem;color:#6b7280;">
+          <strong>Parent tips:</strong>
+          <?= htmlspecialchars(implode(' • ', $riskTips)) ?>
+        </div>
+      <?php endif; ?>
+    </div>
+
     <div class="card stat-card clickable" data-open-page="child-performance">
       <div class="stat-label">Child Progress</div>
       <div class="stat-value"><?= htmlspecialchars($child_progress) ?>%</div>
