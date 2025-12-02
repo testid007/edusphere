@@ -107,10 +107,16 @@ $notifCount = count($notifications);
           </a>
           <!-- END FIX -->
 
+          <a href="#" class="nav-link" data-page="manage-class-teachers">
+            <i class="fas fa-calendar-alt"></i> Manage Class Teachers
+          </a>
+          
+          <a href="#" class="nav-link" data-page="manage-teacher-subjects">
+            <i class="fas fa-calendar-alt"></i> Manage Teacher subjects
+          </a>
           <a href="#" class="nav-link" data-page="manage-schedule">
             <i class="fas fa-calendar-alt"></i> Manage Schedule
           </a>
-
           <a href="#" class="nav-link" data-page="schedule-view">
             <i class="fas fa-eye"></i> Schedule View
           </a>
@@ -251,6 +257,105 @@ $notifCount = count($notifications);
         if (page === 'schedule-view' && typeof initScheduleView === 'function') {
           initScheduleView();
         }
+        if (page === 'manage-schedule' && typeof initManageSchedule === 'function') {
+          initManageSchedule();
+        }
+        function initManageSchedule() {
+  // All elements are inside dashboardContent, not the whole document
+  const root          = dashboardContent;
+  if (!root) return;
+
+  const gradeSelect   = root.querySelector('#grade-select');
+  const btnLoad       = root.querySelector('#btn-load');
+  const btnAuto       = root.querySelector('#btn-auto-generate');
+  const statusEl      = root.querySelector('#status');
+  const displayEl     = root.querySelector('#schedule-display');
+
+  function setStatus(text, type) {
+    if (!statusEl) return;
+    statusEl.className = 'small text-' + (type || 'muted');
+    statusEl.textContent = text;
+  }
+
+  function loadSchedule() {
+    const grade = gradeSelect ? gradeSelect.value : '';
+    if (!grade) {
+      setStatus('Please select a class first.', 'danger');
+      if (displayEl) {
+        displayEl.innerHTML =
+          '<div class="alert alert-info">Select a class/grade.</div>';
+      }
+      return;
+    }
+
+    setStatus('Loading schedule...', 'muted');
+
+    // from /edusphere/dashboards/admin/dashboard.php → ../../api/...
+    fetch(`../../api/fetch_schedule.php?grade=${encodeURIComponent(grade)}`, {
+      cache: 'no-cache'
+    })
+      .then(r => r.text())
+      .then(html => {
+        if (displayEl) displayEl.innerHTML = html;
+        setStatus('Schedule loaded.', 'success');
+      })
+      .catch(err => {
+        console.error('Error loading schedule', err);
+        if (displayEl) {
+          displayEl.innerHTML =
+            '<div class="alert alert-danger">Error loading schedule.</div>';
+        }
+        setStatus('Failed to load schedule.', 'danger');
+      });
+  }
+
+  function autoGenerate() {
+    const grade = gradeSelect ? gradeSelect.value : '';
+    if (!grade) {
+      setStatus('Please select a class first.', 'danger');
+      return;
+    }
+
+    setStatus('Generating schedule...', 'muted');
+    if (btnAuto) btnAuto.disabled = true;
+
+    fetch('../../api/auto_generate_schedule.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'grade=' + encodeURIComponent(grade)
+    })
+      .then(r => r.text())
+      .then(text => {
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          console.error('JSON parse error from auto_generate:', text);
+          setStatus('Server returned invalid JSON.', 'danger');
+          return;
+        }
+
+        if (data.success) {
+          setStatus(data.message || 'Schedule generated successfully!', 'success');
+          loadSchedule();
+        } else {
+          setStatus(data.message || 'Failed to generate schedule.', 'danger');
+        }
+      })
+      .catch(err => {
+        console.error('Error while generating schedule', err);
+        setStatus('Error while generating schedule.', 'danger');
+      })
+      .finally(() => {
+        if (btnAuto) btnAuto.disabled = false;
+      });
+  }
+
+  if (btnLoad)  btnLoad.addEventListener('click', loadSchedule);
+  if (btnAuto)  btnAuto.addEventListener('click', autoGenerate);
+  if (gradeSelect) gradeSelect.addEventListener('change', loadSchedule);
+}
+
       })
       .catch(error => {
         console.error(error);

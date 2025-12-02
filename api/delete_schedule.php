@@ -1,40 +1,29 @@
 <?php
-header('Content-Type: application/json');
 session_start();
 require_once __DIR__.'/../functions/ScheduleManager.php';
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-    echo json_encode(['success' => false, 'error' => 'Method not allowed']);
-    exit;
+header('Content-Type: application/json');
+
+$role   = strtolower($_SESSION['user_role'] ?? '');
+$userId = (int)($_SESSION['user_id'] ?? 0);
+
+if (!$userId || $role !== 'admin') {
+  echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+  exit;
 }
 
-// Verify CSRF token
-if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
-    http_response_code(403);
-    echo json_encode(['success' => false, 'error' => 'Invalid CSRF token']);
-    exit;
+$grade = $_POST['grade'] ?? '';
+$grade = trim($grade);
+
+if (!$grade) {
+  echo json_encode(['success' => false, 'message' => 'Grade is required']);
+  exit;
 }
 
-try {
-    $scheduleManager = new ScheduleManager();
-    $id = isset($_POST['id']) ? (int)$_POST['id'] : 0;
-    
-    if ($id <= 0) {
-        echo json_encode(['success' => false, 'error' => 'Invalid entry ID']);
-        exit;
-    }
-    
-    $result = $scheduleManager->deleteScheduleEntry($id);
-    
-    if ($result) {
-        echo json_encode(['success' => true, 'message' => 'Schedule entry deleted successfully']);
-    } else {
-        echo json_encode(['success' => false, 'error' => 'Failed to delete schedule entry']);
-    }
-    
-} catch (Exception $e) {
-    error_log("Schedule delete error: " . $e->getMessage());
-    echo json_encode(['success' => false, 'error' => 'Database error occurred']);
-}
-?>
+$manager = new ScheduleManager();
+$ok = $manager->clearClassSchedule($grade);
+
+echo json_encode([
+  'success' => $ok,
+  'message' => $ok ? '✅ Schedule deleted!' : '❌ Delete failed'
+]);

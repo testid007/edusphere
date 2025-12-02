@@ -22,11 +22,17 @@ $user_name = $user_name ?? 'User';
   </div>
 </header>
 
+<!-- ✅ LOAD ADMIN SCHEDULE JS FOR BUTTONS -->
+<script src="../../assets/js/admin-schedule.js"></script>
+
 <script>
-  // Notification toggle
+  // Notification toggle (defensive – in case header is used without bell)
   const bell = document.getElementById('notificationBell');
   const dropdown = document.getElementById('notificationDropdown');
-  bell.addEventListener('click', () => {
-    dropdown.classList.toggle('show');
-  });
+
+  if (bell && dropdown) {
+    bell.addEventListener('click', () => {
+      dropdown.classList.toggle('show');
+    });
+  }
 </script>
