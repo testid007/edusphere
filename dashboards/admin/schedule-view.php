@@ -3,102 +3,138 @@
 // and optionally $classNumber set by fetch_schedule.php
 
 if (!isset($schedule) || empty($schedule)) {
-    echo '<div class="alert alert-info">No schedule found for this class.</div>';
+    echo '<div class="alert alert-info" style="
+        background:#dbeafe;
+        border:1px solid #93c5fd;
+        color:#1e3a8a;
+        padding:10px 14px;
+        border-radius:10px;
+        font-size:0.9rem;
+        margin-bottom:14px;
+    ">No schedule found for this class.</div>';
     return;
 }
 
-// Figure out class label
 if (!isset($classNumber)) {
     $first = reset($schedule);
     $classNumber = htmlspecialchars($first['class'] ?? '');
 }
 
-/**
- * Normalize label for special rows (Break / Lunch / Club)
- */
 function normalize_special_label(string $name): string {
     $n = strtolower($name);
 
-    if (str_contains($n, 'short break')) {
-        return 'Short Break';
-    }
-    if (str_contains($n, 'break') && !str_contains($n, 'short')) {
-        return 'Break';
-    }
-    if (str_contains($n, 'lunch')) {
-        return 'Lunch Break';
-    }
-    if (str_contains($n, 'club')) {
-        return 'Club Time';
-    }
-    // fallback
+    if (str_contains($n, 'short break')) return 'Short Break';
+    if (str_contains($n, 'break') && !str_contains($n, 'short')) return 'Break';
+    if (str_contains($n, 'lunch')) return 'Lunch Break';
+    if (str_contains($n, 'club')) return 'Club Time';
+
     return ucwords($name);
 }
 ?>
 
 <style>
-.table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-bottom: 1rem;
-    font-size: 14px;
+/* Title */
+.schedule-title {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 16px;
 }
-.table thead.table-primary th {
-    background-color: #21860d;
-    color: #fff;
-    text-align: center;
-    font-size: 16px;
-    padding: 10px;
+
+/* Table wrapper */
+.schedule-table-wrapper {
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--bg-main);
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-card);
 }
-.table thead tr:nth-child(2) th {
-    background-color: #f8f9fa;
-    color: #333;
-    text-align: center;
-    padding: 8px;
+
+/* Table */
+.schedule-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
 }
-.table td, .table th {
-    border: 1px solid #dee2e6;
-    padding: 8px;
-    text-align: center;
-    vertical-align: middle;
+
+/* Day Header */
+.schedule-table thead.schedule-day th {
+  background: var(--accent);
+  color: #fff;
+  text-align: center;
+  padding: 12px 6px;
+  font-size: 1rem;
+  letter-spacing: 0.5px;
 }
-.table tbody tr:nth-child(even) {
-    background-color: #f2f2f2;
+
+/* Columns Header */
+.schedule-table thead.schedule-columns th {
+  background: var(--bg-sidebar);
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-soft);
+  padding: 10px;
+  font-weight: 600;
+  text-align: center;
 }
-.table td:nth-child(3),
-.table td:nth-child(4) {
-    font-weight: 500;
+
+/* Body rows */
+.schedule-table td {
+  border-bottom: 1px solid var(--border-soft);
+  padding: 10px;
+  text-align: center;
+  color: var(--text-main);
 }
-h4 {
-    margin-bottom: 20px;
-    font-weight: 600;
-    color: #333;
+
+/* Alternating row color */
+.schedule-table tbody tr:nth-child(even) {
+  background: #f9fafb;
+}
+
+/* Hover */
+.schedule-table tbody tr:hover {
+  background: var(--accent-soft);
+}
+
+/* Special period (break/lunch) */
+.schedule-table .special {
+  font-weight: 600;
+  color: var(--accent-strong);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .schedule-table td,
+  .schedule-table th {
+    padding: 8px 4px;
+  }
 }
 </style>
 
-<h4>Schedule for Class: <?= htmlspecialchars($classNumber) ?></h4>
+<h4 class="schedule-title">Schedule for Class: <?= htmlspecialchars($classNumber) ?></h4>
 
-<div class="table-responsive">
-  <table class="table table-bordered">
+<div class="table-responsive schedule-table-wrapper">
+  <table class="schedule-table">
     <?php
     $currentDay = null;
+
     foreach ($schedule as $row):
 
-        $day          = $row['day'];
-        $periodName   = $row['period_name'];
-        $timeRange    = substr($row['start_time'], 0, 5) . '-' . substr($row['end_time'], 0, 5);
-        $isSpecial    = !empty($row['is_special']);
-        $specialName  = $row['special_name'] ?? '';
-        $subjectName  = $row['subject'] ?? '';
-        $teacherName  = $row['teacher'] ?? '';
+        $day         = $row['day'];
+        $periodName  = $row['period_name'];
+        $timeRange   = substr($row['start_time'], 0, 5) . '-' . substr($row['end_time'], 0, 5);
+        $isSpecial   = !empty($row['is_special']);
+        $specialName = $row['special_name'] ?? '';
+        $subjectName = $row['subject'] ?? '';
+        $teacherName = $row['teacher'] ?? '';
 
         if ($isSpecial) {
-            // Use normalized label for special rows
             $subjectLabel = normalize_special_label($specialName ?: $periodName);
             $teacherLabel = '—';
+            $specialClass = 'special';
         } else {
             $subjectLabel = $subjectName !== '' ? $subjectName : '—';
             $teacherLabel = $teacherName !== '' ? $teacherName : 'Not assigned';
+            $specialClass = '';
         }
 
         if ($day !== $currentDay):
@@ -106,10 +142,13 @@ h4 {
               </tbody>
             <?php endif; ?>
 
-            <thead class="table-primary">
+            <thead class="schedule-day">
               <tr>
                 <th colspan="4"><?= htmlspecialchars($day) ?></th>
               </tr>
+            </thead>
+
+            <thead class="schedule-columns">
               <tr>
                 <th>Period</th>
                 <th>Time</th>
@@ -117,17 +156,20 @@ h4 {
                 <th>Teacher</th>
               </tr>
             </thead>
+
             <tbody>
             <?php
             $currentDay = $day;
         endif;
     ?>
-        <tr>
-          <td><?= htmlspecialchars($periodName) ?></td>
-          <td><?= htmlspecialchars($timeRange) ?></td>
-          <td><?= htmlspecialchars($subjectLabel) ?></td>
-          <td><?= htmlspecialchars($teacherLabel) ?></td>
-        </tr>
+
+    <tr>
+      <td><?= htmlspecialchars($periodName) ?></td>
+      <td><?= htmlspecialchars($timeRange) ?></td>
+      <td class="<?= $specialClass ?>"><?= htmlspecialchars($subjectLabel) ?></td>
+      <td><?= htmlspecialchars($teacherLabel) ?></td>
+    </tr>
+
     <?php endforeach; ?>
     </tbody>
   </table>
