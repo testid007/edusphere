@@ -353,4 +353,21 @@ class ScheduleManager {
             return false;
         }
     }
+        /**
+     * Get class teacher user_id for a given class (grade) from schedule_class_teachers.
+     * Returns null if not found.
+     */
+    public function getClassTeacherId(string $class): ?int
+    {
+        $stmt = $this->conn->prepare("
+            SELECT user_id
+            FROM schedule_class_teachers
+            WHERE class = ?
+            LIMIT 1
+        ");
+        $stmt->execute([$class]);
+        $id = $stmt->fetchColumn();
+        return $id !== false ? (int)$id : null;
+    }
+
 }

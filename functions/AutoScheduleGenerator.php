@@ -14,20 +14,21 @@ class AutoScheduleGenerator
     /**
      * Main entry point.
      *
-     * @param string|int $grade  e.g. "1", "2", ..., "10"
+     * @param string|int $grade   e.g. "1", "2", ..., "10"
      * @param array      $options Optional: ['constraints' => [...], 'generated_by' => userId]
      *
      * @return array ['success' => bool, 'message' => string, 'stats' => [...]]
      */
     public function generateSchedule($grade, array $options = []): array
     {
-        $grade = (string) $grade;
+        $grade = (string)$grade;
 
-        // 1) Load data from DB using your existing manager
+        // 1) Load base data from DB using ScheduleManager
         $teachersRaw = $this->scheduleManager->getTeachersWithSubjects();
-        $subjects    = $this->scheduleManager->getSubjectsForGrade((int) $grade);
-        $timeSlots   = $this->scheduleManager->getTimeSlots(false); // normal (Sun–Thu) slots
-          // 🔎 Remove non-teaching "subjects" like Lunch / Break / Club
+        $subjects    = $this->scheduleManager->getSubjectsForGrade((int)$grade);
+        $timeSlots   = $this->scheduleManager->getTimeSlots(false); // base daily pattern
+
+        // 🔎 Remove non-teaching "subjects" like Break / Lunch / Club
         $subjects = array_values(array_filter($subjects, function ($s) {
             $n = strtolower($s['name'] ?? '');
             return !(
@@ -40,11 +41,11 @@ class AutoScheduleGenerator
         if (empty($subjects)) {
             return [
                 'success' => false,
-                'message' => "No academic subjects found for class '{$grade}' " .
-                             "(schedule_subjects only contains breaks/lunch/club?).",
+                'message' => "No academic subjects found for class '{$grade}'.",
                 'stats'   => []
             ];
         }
+
         // Normalise teachers: add subjects_list array for quick checks
         $teachers = [];
         foreach ($teachersRaw as $t) {
@@ -55,14 +56,6 @@ class AutoScheduleGenerator
             $teachers[] = $t;
         }
 
-        if (empty($subjects)) {
-            return [
-                'success' => false,
-                'message' => "No subjects found in schedule_subjects for class '{$grade}'.",
-                'stats'   => []
-            ];
-        }
-
         if (empty($timeSlots)) {
             return [
                 'success' => false,
@@ -71,14 +64,14 @@ class AutoScheduleGenerator
             ];
         }
 
-        // Days: keep it simple for now (Fri special can be added later)
-        $days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday'];
+        // Days: Sun–Thu + Friday
+        $days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
-        // 2) Build constraints purely from schedule_subjects (NO extra tables)
+        // 2) Build constraints from schedule_subjects (no extra tables)
         $this->buildConstraints($grade, $subjects, $timeSlots, $days, $options['constraints'] ?? []);
 
-        // 3) Construct schedule
-        $result = $this->constructSchedule($days, $timeSlots, $subjects, $teachers);
+        // 3) Construct schedule (in-memory)
+        $result = $this->constructSchedule($days, $timeSlots, $subjects, $teachers, $grade);
 
         if ($result === null) {
             return [
@@ -90,7 +83,7 @@ class AutoScheduleGenerator
 
         [$schedule, $stats] = $result;
 
-        // 4) Save into DB
+        // 4) Save into DB (replace previous schedule for this class)
         $this->scheduleManager->clearClassSchedule($grade);
         foreach ($schedule as $day => $slotMap) {
             foreach ($slotMap as $slotId => $entry) {
@@ -99,26 +92,26 @@ class AutoScheduleGenerator
                 }
 
                 if (!empty($entry['is_special'])) {
-                    // Special entry (Break/Lunch/Club)
+                    // Special entry (Break / Lunch / Club / Class Teacher Time / Club Time)
                     $this->scheduleManager->saveScheduleEntry(
                         null,
                         $grade,
                         $day,
-                        (int) $slotId,
+                        (int)$slotId,
                         null,
-                        null,
+                        $entry['teacher_id'] ?? null,
                         1,
                         $entry['special_name'] ?? null
                     );
                 } else {
-                    // Teaching period
+                    // Normal teaching period
                     $this->scheduleManager->saveScheduleEntry(
                         null,
                         $grade,
                         $day,
-                        (int) $slotId,
+                        (int)$slotId,
                         $entry['subject_id'],
-                        $entry['teacher_id'], // may be NULL = "Not assigned"
+                        $entry['teacher_id'], // may be NULL → "Not assigned"
                         0,
                         null
                     );
@@ -137,58 +130,65 @@ class AutoScheduleGenerator
      *  Constraint Setup (NO separate class_requirements table)
      * ============================================================ */
 
-    private function buildConstraints(string $grade, array $subjects, array $timeSlots, array $days, array $override = []): void
-    {
-        // Base defaults (you can tweak these numbers)
+    private function buildConstraints(
+        string $grade,
+        array $subjects,
+        array $timeSlots,
+        array $days,
+        array $override = []
+    ): void {
+        // Base defaults (tweak as you like)
         $defaults = [
             'max_hours_per_teacher_per_week' => 30,
             'max_periods_per_day'           => 6,
             'max_consecutive_periods'       => 3,
-            'default_core_periods'          => 5, // e.g. English/Math/Science etc
-            'default_noncore_periods'       => 3, // Computer, HPE, Moral etc
+            'default_core_periods'          => 5, // e.g. English / Math / Science
+            'default_noncore_periods'       => 3, // Computer / HPE / Moral / GK etc.
             'required_subjects_per_week'    => [] // filled below
         ];
 
         $constraints = array_merge($defaults, $override);
 
-        // Build required counts using schedule_subjects (no DB table)
+        // Build required counts using schedule_subjects (no separate DB table)
         $required = [];
         foreach ($subjects as $subj) {
-            $name     = $subj['name'];
-            $isCore   = !empty($subj['is_core']);
-            $base     = $isCore ? $constraints['default_core_periods']
-                                : $constraints['default_noncore_periods'];
+            $name   = $subj['name'];
+            $isCore = !empty($subj['is_core']);
+            $base   = $isCore
+                ? $constraints['default_core_periods']
+                : $constraints['default_noncore_periods'];
 
-            // Allow override by name if user passes it
+            // Allow override by exact subject name if user passes it
             if (isset($constraints['required_subjects_per_week'][$name])) {
-                $base = (int) $constraints['required_subjects_per_week'][$name];
+                $base = (int)$constraints['required_subjects_per_week'][$name];
             }
 
-            $required[$name] = max(1, (int) $base);
+            $required[$name] = max(1, (int)$base);
         }
 
-        // Total teachable slots per day (ignore breaks/lunch/club)
+        // Count teachable slots per day (ignore breaks / lunch / club)
         $teachingSlotsPerDay = 0;
         foreach ($timeSlots as $slot) {
             $label = strtolower($slot['period_name']);
             if (
-                strpos($label, 'break') !== false ||
-                strpos($label, 'lunch') !== false ||
-                strpos($label, 'club')  !== false
+                str_contains($label, 'break') ||
+                str_contains($label, 'lunch') ||
+                str_contains($label, 'club')
             ) {
                 continue;
             }
             $teachingSlotsPerDay++;
         }
 
+        // Approximate: assume same pattern for all days
         $totalSlots    = $teachingSlotsPerDay * count($days);
         $totalRequired = array_sum($required);
 
-        // If subject demands > available slots, scale down proportionally
+        // If demand > available slots, scale down proportionally
         if ($totalRequired > 0 && $totalRequired > $totalSlots) {
             $scale = $totalSlots / $totalRequired;
             foreach ($required as $name => $count) {
-                $required[$name] = max(1, (int) floor($count * $scale));
+                $required[$name] = max(1, (int)floor($count * $scale));
             }
         }
 
@@ -200,8 +200,20 @@ class AutoScheduleGenerator
      *  Core Heuristic Scheduling
      * ============================================================ */
 
-    private function constructSchedule(array $days, array $timeSlots, array $subjects, array $teachers): ?array
-    {
+    /**
+     * Construct schedule using a greedy heuristic with hard constraints.
+     *
+     * Adds:
+     *  - Friday: only 4 teaching periods, rest → "Club Time"
+     *  - Strong preference for class teacher in Period 1 (Sun–Thu)
+     */
+    private function constructSchedule(
+        array $days,
+        array $timeSlots,
+        array $subjects,
+        array $teachers,
+        string $grade
+    ): ?array {
         // Final structure: $schedule[day][slotId] = [subject_id, teacher_id, is_special, special_name]
         $schedule = [];
         foreach ($days as $day) {
@@ -211,16 +223,19 @@ class AutoScheduleGenerator
             }
         }
 
+        // Who is class teacher for this class?
+        $classTeacherId = $this->scheduleManager->getClassTeacherId($grade);
+
         // Teacher load tracking
         $teacherWeekLoad    = [];
         $teacherDayLoad     = [];
-        $teacherLastTeacher = []; // per day: last teacher assigned in that class
+        $teacherLastTeacher = []; // per day: last teacher that taught this class
         $teacherConsecutive = [];
 
         foreach ($teachers as $t) {
-            $tid = (int) $t['id'];
-            $teacherWeekLoad[$tid] = 0;
-            $teacherDayLoad[$tid]  = [];
+            $tid = (int)$t['id'];
+            $teacherWeekLoad[$tid]    = 0;
+            $teacherDayLoad[$tid]     = [];
             $teacherConsecutive[$tid] = [];
             foreach ($days as $d) {
                 $teacherDayLoad[$tid][$d]     = 0;
@@ -231,28 +246,62 @@ class AutoScheduleGenerator
             $teacherLastTeacher[$d] = null;
         }
 
-        // Subject counts for fairness / requirement tracking
+        // Subject counts used this week
         $subjectCount = [];
-        $subjectById  = [];
         foreach ($subjects as $s) {
-            $sid = (int) $s['id'];
-            $subjectCount[$sid] = 0;
-            $subjectById[$sid]  = $s;
+            $subjectCount[(int)$s['id']] = 0;
         }
 
-        // Build list of slots; mark breaks/lunch/club as special, not teachable
+        // Precompute required counts by subject name
+        $requiredPerName = $this->constraints['required_subjects_per_week'] ?? [];
+
+        // Build list of *teaching* slots; mark breaks/lunch/club as special.
+        // Friday: after 4 teaching periods, remaining periods become "Club Time".
         $slotList = [];
         foreach ($days as $day) {
+            $teachingCountForDay = 0;
+
             foreach ($timeSlots as $slot) {
-                $slotId = (int) $slot['id'];
+                $slotId = (int)$slot['id'];
                 $name   = $slot['period_name'];
                 $label  = strtolower($name);
 
-                if (
-                    strpos($label, 'break') !== false ||
-                    strpos($label, 'lunch') !== false ||
-                    strpos($label, 'club')  !== false
-                ) {
+                $isBreakLike = str_contains($label, 'break') || str_contains($label, 'lunch') || str_contains($label, 'club');
+                $isPeriod    = str_contains($label, 'period');
+
+                if ($day === 'Friday') {
+                    if ($isBreakLike) {
+                        // Break / Lunch rows on Friday
+                        $schedule[$day][$slotId] = [
+                            'subject_id'   => null,
+                            'teacher_id'   => null,
+                            'is_special'   => 1,
+                            'special_name' => $name
+                        ];
+                        continue;
+                    }
+
+                    if ($isPeriod) {
+                        $teachingCountForDay++;
+                        if ($teachingCountForDay <= 4) {
+                            // First 4 periods = teaching periods
+                            $slotList[] = [
+                                'day'  => $day,
+                                'slot' => $slot
+                            ];
+                        } else {
+                            // Periods after 4th = Club Time rows
+                            $schedule[$day][$slotId] = [
+                                'subject_id'   => null,
+                                'teacher_id'   => null,
+                                'is_special'   => 1,
+                                'special_name' => 'Club Time'
+                            ];
+                        }
+                        continue;
+                    }
+
+                    // Anything else on Friday treat as special
                     $schedule[$day][$slotId] = [
                         'subject_id'   => null,
                         'teacher_id'   => null,
@@ -262,6 +311,18 @@ class AutoScheduleGenerator
                     continue;
                 }
 
+                // ===== Sun–Thu =====
+                if ($isBreakLike) {
+                    $schedule[$day][$slotId] = [
+                        'subject_id'   => null,
+                        'teacher_id'   => null,
+                        'is_special'   => 1,
+                        'special_name' => $name
+                    ];
+                    continue;
+                }
+
+                // Teaching period (Sun–Thu)
                 $slotList[] = [
                     'day'  => $day,
                     'slot' => $slot
@@ -271,13 +332,17 @@ class AutoScheduleGenerator
 
         $assignedSlots = 0;
 
-        // Go through each teaching slot and decide (subject, teacher)
+        // Main loop: choose (subject, teacher) for each teaching slot
         foreach ($slotList as $slotInfo) {
             $day    = $slotInfo['day'];
             $slot   = $slotInfo['slot'];
-            $slotId = (int) $slot['id'];
+            $slotId = (int)$slot['id'];
 
-            // Heuristic: prefer subjects that are furthest from required weekly count
+            $periodLabel = strtolower($slot['period_name']);
+            $isFirstPeriodNormalDay =
+                ($day !== 'Friday' && str_contains($periodLabel, 'period 1'));
+
+            // Heuristic: sort subjects so those used less appear first
             $subjectsOrdered = $subjects;
             usort($subjectsOrdered, function ($a, $b) use (&$subjectCount) {
                 $sa = $subjectCount[(int)$a['id']] ?? 0;
@@ -285,30 +350,31 @@ class AutoScheduleGenerator
                 return $sa <=> $sb; // fewer used first
             });
 
-            $chosen     = null;
-            $bestScore  = PHP_INT_MAX;
+            $chosen    = null;
+            $bestScore = PHP_INT_MAX;
 
             foreach ($subjectsOrdered as $subject) {
-                $subjectId   = (int) $subject['id'];
+                $subjectId   = (int)$subject['id'];
                 $subjectName = $subject['name'];
+                $required    = $requiredPerName[$subjectName] ?? 0;
 
-                // Have we already satisfied weekly count for this subject?
-                $required = $this->constraints['required_subjects_per_week'][$subjectName] ?? 0;
-                if ($required > 0 && $subjectCount[$subjectId] >= $required) {
-                    continue;
-                }
-
-                // ---- TRY WITH TEACHERS FIRST ----
+                // ---- TRY WITH REAL TEACHERS FIRST ----
                 $candidateFound = false;
 
                 foreach ($teachers as $teacher) {
-                    $tid = (int) $teacher['id'];
+                    $tid = (int)$teacher['id'];
 
                     if (!$this->canTeacherTeach($teacher, $subjectName)) {
                         continue;
                     }
 
-                    // HARD CONSTRAINTS: only if teacher is assigned (tid)
+                    // Class-teacher rule: in Period 1 (Sun–Thu), strongly favour class teacher
+                    if ($isFirstPeriodNormalDay && $classTeacherId !== null && $tid !== $classTeacherId) {
+                        // still allowed, but they will have a worse score than class teacher
+                        // no early continue here – we let them compete
+                    }
+
+                    // HARD CONSTRAINTS (only if we actually assign a teacher):
                     if ($this->scheduleManager->isTeacherBooked($tid, $day, $slotId, null)) {
                         continue;
                     }
@@ -330,10 +396,10 @@ class AutoScheduleGenerator
                         continue;
                     }
 
-                    // SOFT SCORE: lower is better
+                    // SOFT SCORE (lower is better)
                     $score = 0;
 
-                    // Encourage subjects that still have many periods remaining
+                    // Encourage subjects that are still below their weekly minimum
                     $remaining = max(0, $required - $subjectCount[$subjectId]);
                     $score -= $remaining;
 
@@ -343,6 +409,11 @@ class AutoScheduleGenerator
                     // Slight penalty for consecutive periods
                     if ($isSameAsLast) {
                         $score += 1;
+                    }
+
+                    // Strong bonus if this is Period 1 and this teacher is the class teacher
+                    if ($isFirstPeriodNormalDay && $classTeacherId !== null && $tid === $classTeacherId) {
+                        $score -= 100;
                     }
 
                     if ($score < $bestScore) {
@@ -355,10 +426,9 @@ class AutoScheduleGenerator
                     }
                 }
 
-                // ---- IF NO TEACHER ASSIGNED FOR THIS SUBJECT, STILL PLACE SUBJECT ----
+                // ---- IF NO TEACHER AVAILABLE, STILL PLACE THE SUBJECT ----
                 if (!$candidateFound) {
-                    // We place subject with teacher_id = null if weekly requirement not yet met.
-                    // This gives you timetable with "Not assigned" teachers that you can fix manually.
+                    // Timetable will show "Not assigned" so admin can fix later.
                     $score = 0;
                     $remaining = max(0, $required - $subjectCount[$subjectId]);
                     $score -= $remaining;
@@ -367,7 +437,7 @@ class AutoScheduleGenerator
                         $bestScore = $score;
                         $chosen = [
                             'subject_id' => $subjectId,
-                            'teacher_id' => null // <-- important
+                            'teacher_id' => null
                         ];
                     }
                 }
@@ -387,27 +457,20 @@ class AutoScheduleGenerator
                 $subjectCount[$sid]++;
                 $assignedSlots++;
 
-                // Only track load if teacher is real (not NULL)
+                // Update teacher load only if a real teacher was assigned
                 if ($tid !== null) {
-                    if (!isset($teacherWeekLoad[$tid])) {
-                        $teacherWeekLoad[$tid] = 0;
-                    }
-                    if (!isset($teacherDayLoad[$tid][$day])) {
-                        $teacherDayLoad[$tid][$day] = 0;
-                    }
-
                     $teacherWeekLoad[$tid]++;
                     $teacherDayLoad[$tid][$day]++;
 
                     if ($teacherLastTeacher[$day] === $tid) {
                         $teacherConsecutive[$tid][$day]++;
                     } else {
-                        $teacherLastTeacher[$day]      = $tid;
+                        $teacherLastTeacher[$day]       = $tid;
                         $teacherConsecutive[$tid][$day] = 1;
                     }
                 }
             } else {
-                // nothing feasible — leave as empty hole
+                // Nothing feasible: leave as hole (very rare with soft constraints)
                 $schedule[$day][$slotId] = null;
             }
         }
@@ -422,9 +485,8 @@ class AutoScheduleGenerator
     }
 
     /* ============================================================
-     *  Helper: check if teacher can teach subject
+     *  Helper: can this teacher teach this subject?
      * ============================================================ */
-
     private function canTeacherTeach(array $teacher, string $subjectName): bool
     {
         if (empty($teacher['subjects_list'])) {
