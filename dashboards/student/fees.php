@@ -8,96 +8,117 @@ if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'student') {
 
 require_once '../../includes/db.php';
 
-$student_id      = (int)($_SESSION['user_id'] ?? ($_SESSION['student_id'] ?? 0));
+$student_user_id = (int)($_SESSION['user_id'] ?? ($_SESSION['student_id'] ?? 0));
 $student_name    = $_SESSION['student_name']  ?? 'Student';
 $student_email   = $_SESSION['student_email'] ?? 'student@example.com';
-$class           = $_SESSION['class'] ?? 'Unknown';
 $student_avatar  = '../../assets/img/user.jpg';
+
+// We’ll resolve the class from DB (fallback to session)
+$sessionClass = $_SESSION['class'] ?? null;
+$studentClass = $sessionClass ?? 'Unknown';
 
 $invoice        = null;
 $components     = [];
 $netAmount      = 0.0;
 $paidAmount     = 0.0;
 $balance        = 0.0;
-$paymentStatus  = 'Pending';
-$receipt_no     = '';
-$payment_date   = '';
+$paymentStatus  = 'Due';
+$receiptNo      = '';
+$paymentDate    = '';
+$noInvoiceMsg   = null;
 
-if ($student_id) {
-    try {
-        // Latest invoice for this student
+try {
+    if (!$student_user_id) {
+        throw new Exception('Invalid student session.');
+    }
+
+    // 0) Fetch class from students table (for robustness)
+    $stmt = $conn->prepare("
+        SELECT class
+        FROM students
+        WHERE user_id = :sid
+        LIMIT 1
+    ");
+    $stmt->execute([':sid' => $student_user_id]);
+    if ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $studentClass = $row['class'] ?: $studentClass;
+    }
+
+    // 1) Latest invoice for this student (same logic as parent/fee-status.php)
+    $stmt = $conn->prepare("
+        SELECT 
+            fi.id               AS invoice_id,
+            fi.amount_due,
+            fi.discount_amount,
+            fi.created_at,
+            fs.class_name,
+            fs.due_month,
+            fs.academic_year,
+            COALESCE(SUM(fp.amount), 0) AS paid_amount
+        FROM fee_invoices fi
+        JOIN fee_structures fs ON fs.id = fi.fee_structure_id
+        LEFT JOIN fee_payments fp ON fp.invoice_id = fi.id
+        WHERE fi.student_id = :sid
+        GROUP BY fi.id
+        ORDER BY fs.due_month DESC, fi.id DESC
+        LIMIT 1
+    ");
+    $stmt->execute([':sid' => $student_user_id]);
+    $invoice = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$invoice) {
+        $noInvoiceMsg = 'No fee invoice has been generated for you yet.';
+    } else {
+        $invoiceId  = (int)$invoice['invoice_id'];
+        $amountDue  = (float)$invoice['amount_due'];
+        $discount   = (float)$invoice['discount_amount'];
+        $paidAmount = (float)$invoice['paid_amount'];
+
+        $netAmount  = max(0, $amountDue - $discount);
+        $balance    = max(0, $netAmount - $paidAmount);
+
+        if ($paidAmount >= $netAmount && $netAmount > 0) {
+            $paymentStatus = 'Paid';
+        } elseif ($paidAmount > 0 && $balance > 0) {
+            $paymentStatus = 'Partially Paid';
+        } else {
+            $paymentStatus = 'Due';
+        }
+
+        // 2) Components for this invoice
         $stmt = $conn->prepare("
-            SELECT 
-                fi.id               AS invoice_id,
-                fi.amount_due,
-                fi.discount_amount,
-                fi.created_at,
-                fs.class_name,
-                fs.due_month,
-                fs.academic_year,
-                COALESCE(SUM(fp.amount), 0) AS paid_amount
+            SELECT fc.component_name, fc.amount
             FROM fee_invoices fi
             JOIN fee_structures fs ON fs.id = fi.fee_structure_id
-            LEFT JOIN fee_payments fp ON fp.invoice_id = fi.id
-            WHERE fi.student_id = :sid
-            GROUP BY fi.id
-            ORDER BY fs.due_month DESC, fi.id DESC
+            JOIN fee_components fc ON fc.fee_structure_id = fs.id
+            WHERE fi.id = :iid
+            ORDER BY fc.id
+        ");
+        $stmt->execute([':iid' => $invoiceId]);
+        $components = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // 3) Latest payment (for receipt info)
+        $stmt = $conn->prepare("
+            SELECT receipt_no, payment_date, amount
+            FROM fee_payments
+            WHERE invoice_id = :iid
+            ORDER BY payment_date DESC, id DESC
             LIMIT 1
         ");
-        $stmt->execute([':sid' => $student_id]);
-        $invoice = $stmt->fetch(PDO::FETCH_ASSOC);
+        $stmt->execute([':iid' => $invoiceId]);
+        $lastPayment = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        if ($invoice) {
-            $invoiceId  = (int)$invoice['invoice_id'];
-            $amountDue  = (float)$invoice['amount_due'];
-            $discount   = (float)$invoice['discount_amount'];
-            $paidAmount = (float)$invoice['paid_amount'];
-            $netAmount  = max(0, $amountDue - $discount);
-            $balance    = max(0, $netAmount - $paidAmount);
-
-            if ($paidAmount >= $netAmount && $netAmount > 0) {
-                $paymentStatus = 'Paid';
-            } elseif ($paidAmount > 0 && $balance > 0) {
-                $paymentStatus = 'Partially Paid';
-            } else {
-                $paymentStatus = 'Pending';
-            }
-
-            // Components
-            $stmt = $conn->prepare("
-                SELECT fc.component_name, fc.amount
-                FROM fee_invoices fi
-                JOIN fee_structures fs ON fs.id = fi.fee_structure_id
-                JOIN fee_components fc ON fc.fee_structure_id = fs.id
-                WHERE fi.id = :iid
-                ORDER BY fc.id
-            ");
-            $stmt->execute([':iid' => $invoiceId]);
-            $components = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-            // Latest payment for receipt info
-            $stmt = $conn->prepare("
-                SELECT receipt_no, payment_date
-                FROM fee_payments
-                WHERE invoice_id = :iid
-                ORDER BY payment_date DESC, id DESC
-                LIMIT 1
-            ");
-            $stmt->execute([':iid' => $invoiceId]);
-            $lastPayment = $stmt->fetch(PDO::FETCH_ASSOC);
-
-            if ($lastPayment) {
-                $receipt_no   = $lastPayment['receipt_no'];
-                $payment_date = date('F j, Y', strtotime($lastPayment['payment_date']));
-            } else {
-                $receipt_no   = '#INV' . date('Y') . sprintf('%04d', $invoiceId);
-                $payment_date = date('F j, Y', strtotime($invoice['created_at']));
-            }
+        if ($lastPayment) {
+            $receiptNo   = $lastPayment['receipt_no'];
+            $paymentDate = date('F j, Y', strtotime($lastPayment['payment_date']));
+        } else {
+            $receiptNo   = '#INV' . date('Y') . sprintf('%04d', $invoiceId);
+            $paymentDate = date('F j, Y', strtotime($invoice['created_at']));
         }
-    } catch (PDOException $e) {
-        $invoice    = null;
-        $components = [];
     }
+
+} catch (Exception $e) {
+    $noInvoiceMsg = 'Error: ' . $e->getMessage();
 }
 ?>
 <!DOCTYPE html>
@@ -110,7 +131,6 @@ if ($student_id) {
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
 
   <style>
-    /* your existing student fee page styles unchanged */
     :root{
       --bg-page:#f5eee9;
       --bg-shell:#fdfcfb;
@@ -188,6 +208,7 @@ if ($student_id) {
       transform:translateX(3px);
     }
     .nav a.logout{margin-top:10px;color:#b91c1c;}
+
     .sidebar-student-card{
       margin-top:24px;
       padding:14px 16px;
@@ -345,16 +366,19 @@ if ($student_id) {
       font-size:0.85rem;
       font-weight:600;
       margin:8px 0;
-      background:#fee2e2;
-      color:#b91c1c;
+      background:#fffbeb;
+      color:#92400e;
+      border:1px solid #fed7aa;
     }
     .fee-status-badge.paid{
       background:#dcfce7;
       color:#15803d;
+      border-color:#bbf7d0;
     }
     .fee-status-badge.partial{
       background:#eff6ff;
       color:#1d4ed8;
+      border-color:#bfdbfe;
     }
 
     .fee-status-footer{
@@ -434,13 +458,13 @@ if ($student_id) {
           <span>For your personal records</span>
         </div>
 
-        <?php if (!$invoice): ?>
-          <p>No fee invoice has been generated for you yet.</p>
+        <?php if ($noInvoiceMsg): ?>
+          <p><?= htmlspecialchars($noInvoiceMsg) ?></p>
         <?php else: ?>
           <div class="fee-bill-header">
             <h2>EduSphere School</h2>
             <p>
-              Invoice for Class <?= htmlspecialchars($invoice['class_name']) ?> ·
+              Invoice for Class <?= htmlspecialchars($invoice['class_name'] ?: $studentClass) ?> ·
               <?= date('M Y', strtotime($invoice['due_month'])) ?>
               (<?= htmlspecialchars($invoice['academic_year']) ?>)
             </p>
@@ -453,15 +477,15 @@ if ($student_id) {
             </div>
             <div class="info-row">
               <div class="label">Class:</div>
-              <div class="value"><?= htmlspecialchars($class) ?></div>
+              <div class="value"><?= htmlspecialchars($invoice['class_name'] ?: $studentClass) ?></div>
             </div>
             <div class="info-row">
               <div class="label">Receipt / Invoice No:</div>
-              <div class="value"><?= htmlspecialchars($receipt_no) ?></div>
+              <div class="value"><?= htmlspecialchars($receiptNo) ?></div>
             </div>
             <div class="info-row">
               <div class="label">Generated On:</div>
-              <div class="value"><?= htmlspecialchars($payment_date) ?></div>
+              <div class="value"><?= htmlspecialchars($paymentDate) ?></div>
             </div>
           </div>
 
@@ -480,6 +504,8 @@ if ($student_id) {
                     <td>Rs. <?= number_format($c['amount'], 2) ?></td>
                   </tr>
                 <?php endforeach; ?>
+              <?php else: ?>
+                <tr><td colspan="2">No fee components defined.</td></tr>
               <?php endif; ?>
               <tr>
                 <td><strong>Net Amount</strong></td>
@@ -498,8 +524,11 @@ if ($student_id) {
 
           <?php
             $badgeClass = '';
-            if ($paymentStatus === 'Paid')      $badgeClass = 'paid';
-            elseif ($paymentStatus === 'Partially Paid') $badgeClass = 'partial';
+            if ($paymentStatus === 'Paid') {
+                $badgeClass = 'paid';
+            } elseif ($paymentStatus === 'Partially Paid') {
+                $badgeClass = 'partial';
+            }
           ?>
           <div style="text-align:center;">
             <span class="fee-status-badge <?= $badgeClass ?>">
@@ -513,7 +542,7 @@ if ($student_id) {
             <?php elseif ($paymentStatus === 'Partially Paid'): ?>
               Partial payment recorded. Remaining balance is shown above.
             <?php else: ?>
-              No payment recorded yet. For any confusion, please contact the account section.
+              Invoice generated. Please clear the due amount at the accounts office.
             <?php endif; ?>
           </div>
 
